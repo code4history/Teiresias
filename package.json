@@ -1,0 +1,10 @@
+{
+  "name": "@c4h/teiresias",
+  "version": "0.0.0",
+  "private": true,
+  "type": "module",
+  "description": "CRS and world-file estimator for Maplat V3.1.",
+  "engines": {
+    "node": ">=20"
+  }
+}
