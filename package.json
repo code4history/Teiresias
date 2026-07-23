@@ -4,6 +4,7 @@
   "private": true,
   "type": "module",
   "description": "CRS and world-file estimator for Maplat V3.1.",
+  "license": "MIT",
   "engines": {
     "node": ">=20"
   }
