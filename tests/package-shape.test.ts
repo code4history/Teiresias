@@ -252,7 +252,9 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line !== '');
-    expect(ignored).toEqual(['node_modules/', 'dist/', '*.tsbuildinfo']);
+    // m2a-t1: MIN-IR-3（m1-t1 からの持ち越し）で `coverage/` を追加した。
+    // 完全一致 assert のまま追随させる（順不同集合へ緩めない。生成物除外の全数固定を保つ）。
+    expect(ignored).toEqual(['node_modules/', 'dist/', 'coverage/', '*.tsbuildinfo']);
   });
 });
 
