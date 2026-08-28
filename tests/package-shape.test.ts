@@ -82,13 +82,41 @@ describe('AC-m1-1: runtime dependency と公開 surface', () => {
     expect(packageJson.dependencies['@c4h/daedalus']).toBe('link:../Daedalus');
   });
 
+  /**
+   * m2a-t1/AC-8（設計 v1.5 §5.4 発火 1。`outer rule-0015`）。
+   *
+   * m1-t1 の実装は `dependencies` と `devDependencies` の**両方**から Atlas を禁じていたが、
+   * 守るべき不変条件は「Teiresias の**実行時**に engine が入らないこと」【C7】である。
+   * 全面禁止はその十分条件でありながら**テストからの engine 注入も不可能にし**、仕様正本
+   * `AC-m2a-2`（実 engine E2E）と正面から矛盾する。m1-t1/AC-m1-1 の文言自体が
+   * 「型だけの Atlas import と区別される」と型専用参照の存在を前提にしている。
+   *
+   * ∴ 緩めるのではなく**本来の不変条件へ置き換える**: (a) `dependencies` が 1 件であること、
+   * (b) `src` 全域に Atlas 参照が 0 件であることの積で担保する（(b) は依存名一覧より強い）。
+   */
   it('runtime dependencies は @c4h/daedalus の 1 件だけで、Atlas を含まない', () => {
     expect(Object.keys(packageJson.dependencies)).toEqual(['@c4h/daedalus']);
-    const allDeps = [
-      ...Object.keys(packageJson.dependencies),
-      ...Object.keys(packageJson.devDependencies),
-    ];
-    expect(allDeps.filter((name) => name.toLowerCase().includes('atlas'))).toEqual([]);
+    expect(
+      Object.keys(packageJson.dependencies).filter((name) => name.toLowerCase().includes('atlas')),
+    ).toEqual([]);
+  });
+
+  it('Atlas は devDependency としてのみ存在し、link:../Atlas で解決する（m2a-t1）', () => {
+    expect(packageJson.devDependencies['@c4h/atlas']).toBe('link:../Atlas');
+  });
+
+  it('Teiresias src は Atlas を一切参照しない（fs 全域走査。C7 engine 直参照禁止）', () => {
+    // needle は断片から組み立てる（本ファイルは tests/ 配下だが、走査範囲は src/ のみ ∴
+    // 自己検出はしない。それでも m1-t1 の FORBIDDEN_NEEDLES と同じ配慮を残す）。
+    // **走査範囲を tests/ へ広げてはならない** — 新 E2E 自身が必ずヒットする。
+    const needle = `@c4h/${'atlas'}`;
+    const scanned = listFilesRecursively(join(packageRoot, 'src'));
+    expect(scanned.length).toBeGreaterThan(0);
+
+    const hits = scanned.filter((file) =>
+      readFileSync(file, 'utf8').toLowerCase().includes(needle),
+    );
+    expect(hits.map((file) => relative(packageRoot, file))).toEqual([]);
   });
 
   it('exports は public root "." のみで、subpath を掲載しない', () => {
