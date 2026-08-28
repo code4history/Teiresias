@@ -22,6 +22,7 @@
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
     "test:types": "tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck tests/api-smoke.test.ts",
+    "test:types:atlas": "tsc --noEmit --strict --target ES2022 --module ESNext --moduleResolution Bundler --skipLibCheck tests/api-smoke.test.ts",
     "test:watch": "vitest",
     "coverage": "vitest run --coverage"
   },

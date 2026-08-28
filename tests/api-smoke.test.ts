@@ -9,6 +9,8 @@
  */
 import { describe, expect, it } from 'vitest';
 
+import type { ProjectedCrsInfo } from '@c4h/atlas';
+
 import { estimateCrs } from '../src/index.js';
 import type {
   CandidateCrs,
@@ -94,6 +96,31 @@ const selectedResult: EstimationResult = {
   warnings: [],
   untransformableIds: ['MOCK:PLANE-B'],
 };
+
+// --- m2a-t1/AC-1(a): ProjectedCrsInfo → CandidateCrs の assignability ----------
+// Atlas の `ProjectedCrsInfo` が Teiresias の `CandidateCrs` へ **型レベルで** assignable で
+// あることを固定する（仕様 v0.3 AC-m2a-1(a)）。値の生成は不要で、型だけで完結させる。
+// 本 assert が発火するのは tsc CLI 経路だけである — vitest は型を検査しない。
+//
+// ⚠️ **発火するのは `test:types:atlas`（moduleResolution Bundler）だけである。**
+// `test:types`（moduleResolution NodeNext）では `ProjectedCrsInfo` が **`any` へ縮退する**ため
+// 本行は常に通ってしまう（＝ vacuous になる）。原因は Atlas の `dist/*.d.ts` が相対 import を
+// 拡張子なしで出力していること（NodeNext では TS2834。`--skipLibCheck` がそのエラーを黙らせ、
+// 再 export された名前がすべて `any` になる）。実装時の実測:
+//   `const probe: number = projectedCrsInfo;` を一時的に足すと
+//     NodeNext → exit 0（縮退している ∴ 検査が効いていない）
+//     Bundler  → `error TS2322: Type 'ProjectedCrsInfo' is not assignable to type 'number'`
+// ∴ 本 AC の検査経路として `test:types:atlas` を追加した（設計 §5.2 からの逸脱。理由は
+// 設計が「`test:types` の明示対象は api-smoke.test.ts だけ」という前提のみで置き場所を決めており、
+// **その経路で型が実際に解決するか**を測っていなかったことにある）。
+// Atlas 側の d.ts 出力そのものの是正は本タスクの触り先外である ∴ findings として m2b へ渡す。
+// 束縛は**純粋に型レベル**で行う（`declare const` + 代入だと、型は消えても代入文が残り
+// vitest 実行時に ReferenceError になる）。
+type AssertAssignableTo<Target, Source extends Target> = Source;
+export type ProjectedCrsInfoIsAssignableToCandidateCrs = AssertAssignableTo<
+  CandidateCrs,
+  ProjectedCrsInfo
+>;
 
 // --- estimateCrs の signature -------------------------------------------------
 const invoke = (): Promise<EstimationResult> => estimateCrs(gcps, [candidate], fullOptions);

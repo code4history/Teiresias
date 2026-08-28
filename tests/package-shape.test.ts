@@ -206,6 +206,22 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
     expect(packageJson.scripts['test:types']).toContain('tests/api-smoke.test.ts');
   });
 
+  /**
+   * m2a-t1: Atlas 型契約（AC-1(a)）の検査経路を結線する（`outer rule-0012`）。
+   *
+   * `test:types` は `moduleResolution NodeNext` であり、Atlas の `dist/*.d.ts` が相対 import を
+   * 拡張子なしで出力している（NodeNext では TS2834）ため `--skipLibCheck` と相まって
+   * `ProjectedCrsInfo` が `any` へ縮退する ∴ その経路だけでは AC-1(a) が vacuous になる。
+   * `moduleResolution Bundler` の第 2 経路を別 script として足す（`&&` で連ねない）。
+   */
+  it('Atlas 型契約の検査 script が結線されている（m2a-t1/AC-1a）', () => {
+    const script = packageJson.scripts['test:types:atlas'];
+    expect(script).toBeTypeOf('string');
+    expect(script).toContain('--noEmit');
+    expect(script).toContain('--moduleResolution Bundler');
+    expect(script).toContain('tests/api-smoke.test.ts');
+  });
+
   it('vitest と @vitest/coverage-v8 の major が一致する（outer rule-0018）', () => {
     expect(majorOf(packageJson.devDependencies['@vitest/coverage-v8'])).toBe(
       majorOf(packageJson.devDependencies.vitest),
