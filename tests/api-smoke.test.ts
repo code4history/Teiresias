@@ -6,10 +6,10 @@
  * ∴ 公開型の構造を**値の形**で束縛し、局所変異が TS エラーとして発火するようにしてある
  * （発火実証は m1-t1 設計 §15.2 T1 の義務。task-state に実測を記録する）。
  *
- * `estimateCrs` の signature 束縛は T3（実装 commit）で本ファイルへ追加する。
  */
 import { describe, expect, it } from 'vitest';
 
+import { estimateCrs } from '../src/index.js';
 import type {
   CandidateCrs,
   CandidateTransformer,
@@ -95,7 +95,35 @@ const selectedResult: EstimationResult = {
   untransformableIds: ['MOCK:PLANE-B'],
 };
 
-describe('api smoke（公開型の compile-time 束縛）', () => {
+// --- estimateCrs の signature -------------------------------------------------
+const invoke = (): Promise<EstimationResult> => estimateCrs(gcps, [candidate], fullOptions);
+
+describe('api smoke（公開型と estimateCrs signature の compile-time 束縛）', () => {
+  it('estimateCrs は Promise<EstimationResult> を返し、5 フィールドが型どおりである', async () => {
+    const result: EstimationResult = await invoke();
+    const resultStatus: FitStatus = result.status;
+    const selected: EstimationResult['selected'] = result.selected;
+    const ranked: EstimationResult['ranked'] = result.ranked;
+    const warnings: readonly FitWarning[] = result.warnings;
+    const untransformableIds: string[] = result.untransformableIds;
+
+    expect(typeof resultStatus).toBe('string');
+    expect(Array.isArray(ranked)).toBe(true);
+    expect(Array.isArray(warnings)).toBe(true);
+    expect(Array.isArray(untransformableIds)).toBe(true);
+
+    if (selected !== null) {
+      const selectedGate: Exclude<QualityGate, 'unusable'> = selected.qualityGate;
+      const selectedWorldFile: WorldFile = selected.worldFile;
+      const selectedScore: number | null = selected.score;
+      const selectedRms: number = selected.rmsMeters;
+      expect(typeof selectedGate).toBe('string');
+      expect(Object.keys(selectedWorldFile)).toHaveLength(6);
+      expect(selectedScore === null || Number.isFinite(selectedScore)).toBe(true);
+      expect(Number.isFinite(selectedRms)).toBe(true);
+    }
+  });
+
   it('型束縛に使った定数がそのまま実体を持つ', () => {
     expect(candidate.datumFamily).toBe('MOCKDATUM');
     expect(candidateWithoutDatumFamily.datumFamily).toBeUndefined();

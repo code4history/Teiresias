@@ -4,10 +4,25 @@
  * - AC-T1 (a): Teiresias 所有 mock が `contractPoints` に対して `expectedPlaneA` /
  *   `expectedPlaneB` と各座標 `1e-9` 以内で一致すること（m0-t3 からの委任 AC の前半）。
  * - `CandidateTransformer` 8 項目契約と違反シミュレータの全入力域挙動。
- * - AC-m1-3 / AC-INV は T3（estimateCrs 実装 commit）で本ファイルへ追加する。
+ * - AC-m1-3: candidate 単位の失敗隔離と全失敗時の status 規則。
+ * - AC-INV: 設計 §6 の不変条件、非空 L_geo gate、option 正規化、warnings 帰属。
+ * - 公開 API から到達不能な分岐（null-last / `status:'ok'`）は `../src/estimate-crs.js` の
+ *   内部 helper を直接 import して単体検証する（設計 K14 / INF-5。package root へは公開しない）。
  */
+import { fitWorldFile } from '@c4h/daedalus';
 import { describe, expect, it } from 'vitest';
 
+import { estimateCrs } from '../src/index.js';
+import {
+  areScoresTied,
+  basicRmsFromFit,
+  computeObservationScale,
+  deriveSuccessStatus,
+  deriveTopLevelStatus,
+  normalizeEpsilonMeters,
+  normalizePositiveInteger,
+  rankCandidates,
+} from '../src/estimate-crs.js';
 import {
   candidateDefinitions,
   candidateIds,
@@ -30,10 +45,16 @@ import {
   mockTransformer,
   nonFiniteOutputMockTransformer,
   rejectingMockTransformer,
+  teiresiasE2eGcps,
   throwingMockTransformer,
 } from './fixtures/mockTransformer.js';
 
-import type { GeoBasis } from '../src/index.js';
+import type {
+  CandidateCrs,
+  CandidateTransformer,
+  EstimationResult,
+  GeoBasis,
+} from '../src/index.js';
 
 const lonlat: GeoBasis = geoBasisLonLat;
 const planar: GeoBasis = { kind: 'planar_xy', axisOrder: 'xy', unit: 'm' };
@@ -170,5 +191,478 @@ describe('違反シミュレータの全入力域挙動（契約文書 §3）', 
     expect(Number.isFinite((broken as Array<[number, number]>)[0][0])).toBe(false);
     expect(Number.isFinite((broken as Array<[number, number]>)[1][0])).toBe(true);
     expect(nonFiniteOutputMockTransformer(planeAId, emptyPoints, lonlat)).toBeNull();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// T3: estimateCrs の unit test（AC-m1-3 / AC-INV）
+// ---------------------------------------------------------------------------
+
+const planeA = { authority: 'MOCK', code: 'PLANE-A' } as const;
+const planeB = { authority: 'MOCK', code: 'PLANE-B' } as const;
+
+/** transformer の呼出しを記録するラッパ。 */
+function recording(inner: CandidateTransformer): {
+  transformer: CandidateTransformer;
+  calls: Array<{ id: string; points: ReadonlyArray<readonly [number, number]>; geoBasis: GeoBasis }>;
+} {
+  const calls: Array<{
+    id: string;
+    points: ReadonlyArray<readonly [number, number]>;
+    geoBasis: GeoBasis;
+  }> = [];
+  return {
+    calls,
+    transformer: (id, points, geoBasis) => {
+      calls.push({ id, points, geoBasis });
+      return inner(id, points, geoBasis);
+    },
+  };
+}
+
+/** EstimationResult の不変条件（設計 §6 の 1〜7・9）を全数 assert する。 */
+function assertInvariants(result: EstimationResult, inputs: readonly CandidateCrs[]): void {
+  const inputIds = new Set(inputs.map((c) => `${c.authority}:${c.code}`));
+  const rankedIds = result.ranked.map((r) => `${r.authority}:${r.code}`);
+
+  // 1. ranked は入力 candidate 由来
+  for (const id of rankedIds) expect(inputIds.has(id)).toBe(true);
+  // 2. identity 重複なし
+  expect(new Set(rankedIds).size).toBe(rankedIds.length);
+  // 2. score 昇順（null は最後）
+  const finite = result.ranked.filter((r) => r.score !== null).map((r) => r.score as number);
+  const firstNull = result.ranked.findIndex((r) => r.score === null);
+  if (firstNull >= 0) {
+    expect(result.ranked.slice(firstNull).every((r) => r.score === null)).toBe(true);
+  }
+  for (let i = 1; i < finite.length; i++) expect(finite[i]).toBeGreaterThanOrEqual(finite[i - 1]);
+
+  if (result.selected !== null) {
+    // 3
+    expect(result.ranked.length).toBeGreaterThanOrEqual(1);
+    expect(result.selected.identity.authority).toBe(result.ranked[0].authority);
+    expect(result.selected.identity.code).toBe(result.ranked[0].code);
+    expect(result.selected.score).toBe(result.ranked[0].score);
+    expect(result.selected.rmsMeters).toBe(result.ranked[0].rmsMeters);
+    // 4
+    expect(Object.values(result.selected.worldFile).every((v) => Number.isFinite(v))).toBe(true);
+    expect(['adoptable', 'preview']).toContain(result.selected.qualityGate);
+    expect(['ok', 'ok_with_warnings']).toContain(result.status);
+  } else {
+    // 5
+    expect(['failed', 'insufficient']).toContain(result.status);
+  }
+  // 6
+  if (result.status === 'ok') expect(result.warnings).toHaveLength(0);
+  if (result.status === 'ok_with_warnings') expect(result.warnings.length).toBeGreaterThan(0);
+  // 7
+  expect(new Set(result.untransformableIds).size).toBe(result.untransformableIds.length);
+  for (const id of result.untransformableIds) expect(rankedIds).not.toContain(id);
+  // 9: FitWarning は Daedalus 型のまま（code は WarningCode の 7 値）
+  for (const warning of result.warnings) {
+    expect(FROZEN_WARNING_CODES).toContain(warning.code);
+  }
+}
+
+const FROZEN_WARNING_CODES = [
+  'insufficientPointCount',
+  'nearCollinearSource',
+  'affineSkippedCollinear',
+  'affineSkippedInsufficientDof',
+  'affineRejectedNonImproving',
+  'validationSkipped',
+  'unsupportedAxisOrder',
+];
+
+describe('AC-m1-3: candidate 単位の失敗隔離と全失敗時の status', () => {
+  it('1 候補が業務的に null でも残候補を継続し、selected は成功候補になる', async () => {
+    const result = await estimateCrs(teiresiasE2eGcps, [{ authority: 'MOCK', code: 'NO-SUCH' }, planeA], {
+      transformer: mockTransformer,
+    });
+    expect(result.untransformableIds).toEqual(['MOCK:NO-SUCH']);
+    expect(result.selected?.identity).toEqual({ authority: 'MOCK', code: 'PLANE-A' });
+    assertInvariants(result, [{ authority: 'MOCK', code: 'NO-SUCH' }, planeA]);
+  });
+
+  it('空入力でも候補ごとに transformer を呼び、null を untransformableIds へ記録して insufficient', async () => {
+    const spy = recording(mockTransformer);
+    const result = await estimateCrs([], [planeA, planeB], { transformer: spy.transformer });
+    expect(spy.calls.map((c) => c.id)).toEqual(['MOCK:PLANE-A', 'MOCK:PLANE-B']);
+    expect(spy.calls[0].points).toEqual([]);
+    expect(result.status).toBe('insufficient');
+    expect(result.selected).toBeNull();
+    expect(result.ranked).toEqual([]);
+    expect(result.untransformableIds).toEqual(['MOCK:PLANE-A', 'MOCK:PLANE-B']);
+  });
+
+  it('全候補が長さ不一致なら adapter-contract-failure により failed（insufficient へ埋没させない）', async () => {
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
+      transformer: brokenLengthMockTransformer,
+    });
+    expect(result.status).toBe('failed');
+    expect(result.selected).toBeNull();
+    expect(result.untransformableIds).toEqual(['MOCK:PLANE-A', 'MOCK:PLANE-B']);
+    assertInvariants(result, [planeA, planeB]);
+  });
+
+  it('全候補が非有限出力でも failed', async () => {
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
+      transformer: nonFiniteOutputMockTransformer,
+    });
+    expect(result.status).toBe('failed');
+    expect(result.untransformableIds).toEqual(['MOCK:PLANE-A', 'MOCK:PLANE-B']);
+  });
+
+  it('全候補が throw / reject でも failed', async () => {
+    const thrown = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
+      transformer: throwingMockTransformer,
+    });
+    expect(thrown.status).toBe('failed');
+    const rejected = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
+      transformer: rejectingMockTransformer,
+    });
+    expect(rejected.status).toBe('failed');
+    expect(rejected.untransformableIds).toEqual(['MOCK:PLANE-A', 'MOCK:PLANE-B']);
+  });
+
+  it('業務的 null だけなら insufficient（failed にしない）', async () => {
+    const result = await estimateCrs(
+      teiresiasE2eGcps,
+      [
+        { authority: 'MOCK', code: 'NO-SUCH' },
+        { authority: 'MOCK', code: 'NO-SUCH-2' },
+      ],
+      { transformer: mockTransformer },
+    );
+    expect(result.status).toBe('insufficient');
+    expect(result.untransformableIds).toEqual(['MOCK:NO-SUCH', 'MOCK:NO-SUCH-2']);
+  });
+
+  it('throw する候補があっても残候補は評価され、成功候補が selected になる', async () => {
+    const transformer: CandidateTransformer = (id, points, geoBasis) => {
+      if (id === 'MOCK:PLANE-B') throw new Error('boom');
+      return mockTransformer(id, points, geoBasis);
+    };
+    const result = await estimateCrs(teiresiasE2eGcps, [planeB, planeA], { transformer });
+    expect(result.untransformableIds).toEqual(['MOCK:PLANE-B']);
+    expect(result.selected?.identity.code).toBe('PLANE-A');
+    expect(result.status).toBe('ok_with_warnings');
+    assertInvariants(result, [planeB, planeA]);
+  });
+
+  it('identity 空文字は transformer を呼ばず candidate failure にする', async () => {
+    const spy = recording(mockTransformer);
+    const result = await estimateCrs(
+      teiresiasE2eGcps,
+      [{ authority: '', code: 'PLANE-A' }, { authority: 'MOCK', code: '' }, planeA],
+      { transformer: spy.transformer },
+    );
+    expect(spy.calls.map((c) => c.id)).toEqual(['MOCK:PLANE-A']);
+    expect(result.untransformableIds).toEqual([':PLANE-A', 'MOCK:']);
+    expect(result.selected?.identity.code).toBe('PLANE-A');
+  });
+
+  it('identity 重複は最初の 1 件だけ評価し、untransformableIds へ入れない', async () => {
+    const spy = recording(mockTransformer);
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeA, planeB], {
+      transformer: spy.transformer,
+    });
+    expect(spy.calls.map((c) => c.id)).toEqual(['MOCK:PLANE-A', 'MOCK:PLANE-B']);
+    expect(result.untransformableIds).toEqual([]);
+    expect(result.ranked).toHaveLength(2);
+  });
+});
+
+describe('AC-INV: 非空 L_geo gate（K15）', () => {
+  const tiny = [
+    { pixel: [0, 0], geo: [135.0, 35.0] },
+    { pixel: [10, 0], geo: [135.0001, 35.0] },
+    { pixel: [0, 10], geo: [135.0, 35.0001] },
+  ] as const;
+
+  it('L_geo < epsilon なら candidate loop を開始せず insufficient を返す', async () => {
+    const spy = recording(mockTransformer);
+    const result = await estimateCrs(tiny, [planeA, planeB], { transformer: spy.transformer });
+    expect(spy.calls).toEqual([]);
+    expect(result).toEqual({
+      status: 'insufficient',
+      selected: null,
+      ranked: [],
+      warnings: [],
+      untransformableIds: [],
+    });
+  });
+
+  it('非有限 geo 座標でも同じ早期返却になる', async () => {
+    const spy = recording(mockTransformer);
+    const result = await estimateCrs(
+      [
+        { pixel: [0, 0], geo: [135.0, 35.0] },
+        { pixel: [10, 10], geo: [Number.NaN, 35.078125] },
+      ],
+      [planeA],
+      { transformer: spy.transformer },
+    );
+    expect(spy.calls).toEqual([]);
+    expect(result.status).toBe('insufficient');
+    expect(result.untransformableIds).toEqual([]);
+  });
+
+  it('normalizeEpsilonMeters を小さくすれば同じ入力が gate を通る', async () => {
+    const spy = recording(mockTransformer);
+    const result = await estimateCrs(tiny, [planeA], {
+      transformer: spy.transformer,
+      normalizeEpsilonMeters: 1,
+    });
+    expect(spy.calls.map((c) => c.id)).toEqual(['MOCK:PLANE-A']);
+    expect(result.untransformableIds).toEqual([]);
+  });
+});
+
+describe('AC-INV: option 正規化と selected/ranked（K8）', () => {
+  it('topK は ranked を切り詰めるが minCandidates 判定は切り詰め前の usable 全件で行う', async () => {
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
+      transformer: mockTransformer,
+      topK: 1,
+      minCandidates: 2,
+    });
+    expect(result.ranked).toHaveLength(1);
+    expect(result.selected).not.toBeNull();
+    assertInvariants(result, [planeA, planeB]);
+  });
+
+  it('usable が minCandidates に満たなければ insufficient・selected:null。ranked は診断として返す', async () => {
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
+      transformer: mockTransformer,
+      minCandidates: 3,
+    });
+    expect(result.status).toBe('insufficient');
+    expect(result.selected).toBeNull();
+    expect(result.ranked).toHaveLength(2);
+    assertInvariants(result, [planeA, planeB]);
+  });
+
+  it('正の整数でない minCandidates / topK / epsilon は既定へ正規化される', async () => {
+    for (const bad of [0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY]) {
+      const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
+        transformer: mockTransformer,
+        minCandidates: bad,
+        topK: bad,
+        normalizeEpsilonMeters: bad,
+      });
+      expect(result.ranked).toHaveLength(2);
+      expect(result.selected?.identity.code).toBe('PLANE-A');
+    }
+  });
+});
+
+describe('AC-INV: transformer への引数と Daedalus へ渡す basis（K7）', () => {
+  it('transformer は id と入力 geo 点列を同順で受け取り、既定 basis は lonlat_deg/lon-lat', async () => {
+    const spy = recording(mockTransformer);
+    await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: spy.transformer });
+    expect(spy.calls).toHaveLength(1);
+    expect(spy.calls[0].id).toBe('MOCK:PLANE-A');
+    expect(spy.calls[0].points).toEqual(teiresiasE2eGcps.map((g) => g.geo));
+    expect(spy.calls[0].geoBasis).toEqual({ kind: 'lonlat_deg', axisOrder: 'lon-lat' });
+  });
+
+  it('options.geoBasis はそのまま transformer へ渡される（L_geo も同 basis で評価される）', async () => {
+    // planar_xy/m の入力。L_geo = hypot(1000,1000) ≈ 1414 m > 100 m ∴ gate を通る。
+    const planarGcps = [
+      { pixel: [0, 0], geo: [0, 0] },
+      { pixel: [10, 0], geo: [1000, 0] },
+      { pixel: [0, 10], geo: [0, 1000] },
+    ] as const;
+    const spy = recording(mockTransformer);
+    await estimateCrs(planarGcps, [planeA], {
+      transformer: spy.transformer,
+      geoBasis: planar,
+    });
+    expect(spy.calls).toHaveLength(1);
+    expect(spy.calls[0].geoBasis).toEqual(planar);
+    expect(spy.calls[0].points).toEqual(planarGcps.map((g) => g.geo));
+
+    // 同じ入力を lonlat_deg として渡すと L_geo が桁違いになる ∴ basis は L_geo にも効いている
+    expect(computeObservationScale(planarGcps, planar)).toBeCloseTo(Math.hypot(1000, 1000), 9);
+    expect(computeObservationScale(planarGcps, { kind: 'lonlat_deg', axisOrder: 'lon-lat' })).toBeGreaterThan(1e8);
+  });
+
+  it('Daedalus へは planar_xy/m を渡す（入力 basis を横流ししない）', async () => {
+    // 変換後の広がりが 1 m 程度になる transformer。planar_xy/m と解釈すれば
+    // Daedalus の L_geo(=1m) < epsilon(100m) で insufficient になり usable 0 件になる。
+    // 入力 basis(lonlat_deg) を横流しすると L_geo ≈ 111 km となり usable になってしまう。
+    const metreScale: CandidateTransformer = (_id, points) =>
+      points.map(([lon, lat]): [number, number] => [(lon - 135) * 12.8, (lat - 35) * 12.8]);
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: metreScale });
+    expect(result.status).toBe('insufficient');
+    expect(result.selected).toBeNull();
+    expect(result.ranked).toEqual([]);
+    expect(result.untransformableIds).toEqual([]);
+  });
+});
+
+describe('AC-INV: warnings の帰属（K9）', () => {
+  it('成功時 warnings は selected 候補の Daedalus FitWarning だけを同順・同形で返す', async () => {
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
+      transformer: mockTransformer,
+    });
+    const selectedPoints = mockTransformer(
+      'MOCK:PLANE-A',
+      teiresiasE2eGcps.map((g) => g.geo),
+      geoBasisLonLat,
+    ) as Array<[number, number]>;
+    const direct = fitWorldFile(
+      teiresiasE2eGcps.map((g, i) => ({ pixel: g.pixel, geo: selectedPoints[i] })),
+      { geoBasis: planar, debug: true },
+    );
+    expect(result.warnings).toEqual(direct.warnings);
+  });
+
+  it('candidate failure だけでは warnings に何も入らない', async () => {
+    const result = await estimateCrs(teiresiasE2eGcps, [{ authority: 'MOCK', code: 'NO-SUCH' }], {
+      transformer: mockTransformer,
+    });
+    expect(result.warnings).toEqual([]);
+    expect(result.status).toBe('insufficient');
+  });
+});
+
+describe('内部 helper の単体検証（公開 API から到達不能な分岐。K14 / K16 / INF-5）', () => {
+  it('deriveSuccessStatus: 合成 warning 配列で ok / ok_with_warnings を導出する', () => {
+    expect(deriveSuccessStatus([])).toBe('ok');
+    expect(deriveSuccessStatus([{ code: 'validationSkipped' }])).toBe('ok_with_warnings');
+    expect(
+      deriveSuccessStatus([{ code: 'insufficientPointCount' }, { code: 'validationSkipped' }]),
+    ).toBe('ok_with_warnings');
+  });
+
+  it('deriveTopLevelStatus: 設計 §5.6 の 4 行を全数再現し、重なりでは failed を優先する', () => {
+    expect(
+      deriveTopLevelStatus({ usableCount: 2, minCandidates: 1, hasImplementationFailure: false, selectedWarnings: [] }),
+    ).toBe('ok');
+    expect(
+      deriveTopLevelStatus({
+        usableCount: 2,
+        minCandidates: 1,
+        hasImplementationFailure: false,
+        selectedWarnings: [{ code: 'validationSkipped' }],
+      }),
+    ).toBe('ok_with_warnings');
+    expect(
+      deriveTopLevelStatus({ usableCount: 1, minCandidates: 3, hasImplementationFailure: false, selectedWarnings: [] }),
+    ).toBe('insufficient');
+    expect(
+      deriveTopLevelStatus({ usableCount: 0, minCandidates: 1, hasImplementationFailure: true, selectedWarnings: [] }),
+    ).toBe('failed');
+    // 実装失敗があっても usable が 1 件以上あれば data 量の gate（insufficient）
+    expect(
+      deriveTopLevelStatus({ usableCount: 1, minCandidates: 2, hasImplementationFailure: true, selectedWarnings: [] }),
+    ).toBe('insufficient');
+  });
+
+  it('areScoresTied: 機械精度由来の許容だけを同着とする', () => {
+    expect(areScoresTied(1, 1)).toBe(true);
+    expect(areScoresTied(1, 1 + 16 * Number.EPSILON)).toBe(true);
+    expect(areScoresTied(1, 1.0001)).toBe(false);
+    expect(areScoresTied(0, 0)).toBe(true);
+  });
+
+  it('rankCandidates: score 厳密昇順 → 隣接 epsilon group → group 内 prior / identity', () => {
+    const entries = [
+      { authority: 'B', code: '1', score: 1, datumFamily: 'LOW' },
+      { authority: 'A', code: '1', score: 1 + 8 * Number.EPSILON, datumFamily: 'HIGH' },
+      { authority: 'C', code: '1', score: 2, datumFamily: 'HIGH' },
+    ];
+    const ranked = rankCandidates(entries, ['HIGH', 'LOW']);
+    // 1 と 1+8ε は同着 group ∴ group 内で prior HIGH の A が先着
+    expect(ranked.map((e) => e.authority)).toEqual(['A', 'B', 'C']);
+  });
+
+  it('rankCandidates: prior は group をまたいで順位を逆転しない', () => {
+    const entries = [
+      { authority: 'B', code: '1', score: 1, datumFamily: 'LOW' },
+      { authority: 'A', code: '1', score: 2, datumFamily: 'HIGH' },
+    ];
+    expect(rankCandidates(entries, ['HIGH', 'LOW']).map((e) => e.authority)).toEqual(['B', 'A']);
+  });
+
+  it('rankCandidates: 入力順に依存しない（順列を変えても同じ結果）', () => {
+    const entries = [
+      { authority: 'B', code: '1', score: 1, datumFamily: 'LOW' },
+      { authority: 'A', code: '1', score: 1 + 8 * Number.EPSILON, datumFamily: 'HIGH' },
+      { authority: 'C', code: '1', score: 2, datumFamily: 'HIGH' },
+      { authority: 'D', code: '1', score: null },
+    ];
+    const expected = rankCandidates(entries, ['HIGH', 'LOW']).map((e) => e.authority);
+    const permutations = [
+      [3, 2, 1, 0],
+      [1, 0, 3, 2],
+      [2, 3, 0, 1],
+    ];
+    for (const order of permutations) {
+      expect(rankCandidates(order.map((i) => entries[i]), ['HIGH', 'LOW']).map((e) => e.authority)).toEqual(expected);
+    }
+  });
+
+  it('rankCandidates: null score は最後（null-last）で、prior → identity の順に閉じる', () => {
+    const entries = [
+      { authority: 'Z', code: '1', score: null, datumFamily: 'LOW' },
+      { authority: 'A', code: '1', score: null, datumFamily: 'HIGH' },
+      { authority: 'M', code: '1', score: 5 },
+    ];
+    expect(rankCandidates(entries, ['HIGH', 'LOW']).map((e) => e.authority)).toEqual(['M', 'A', 'Z']);
+  });
+
+  it('rankCandidates: prior 未指定・一覧外・値なしは同順位で identity の code-unit 順に閉じる', () => {
+    const entries = [
+      { authority: 'B', code: '1', score: 1, datumFamily: 'UNLISTED' },
+      { authority: 'A', code: '1', score: 1 },
+      { authority: 'C', code: '1', score: 1, datumFamily: 'ALSO-UNLISTED' },
+    ];
+    expect(rankCandidates(entries, ['HIGH']).map((e) => e.authority)).toEqual(['A', 'B', 'C']);
+    expect(rankCandidates(entries, undefined).map((e) => e.authority)).toEqual(['A', 'B', 'C']);
+  });
+
+  it('normalizePositiveInteger / normalizeEpsilonMeters が既定へ落とす', () => {
+    expect(normalizePositiveInteger(3, 1)).toBe(3);
+    for (const bad of [0, -2, 1.5, Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
+      expect(normalizePositiveInteger(bad, 7)).toBe(7);
+    }
+    expect(normalizeEpsilonMeters(5)).toBe(5);
+    for (const bad of [0, -1, Number.NaN, Number.POSITIVE_INFINITY, undefined]) {
+      expect(normalizeEpsilonMeters(bad)).toBe(100);
+    }
+  });
+
+  it('computeObservationScale: 3 basis の L_geo を設計 §5.3 どおり算出する', () => {
+    const lonlatGcps = [
+      { pixel: [0, 0], geo: [135, 35] },
+      { pixel: [1, 1], geo: [135.5, 35] },
+    ] as const;
+    const expectedLon = 0.5 * 111320 * Math.cos((35 * Math.PI) / 180);
+    expect(computeObservationScale(lonlatGcps, { kind: 'lonlat_deg', axisOrder: 'lon-lat' })).toBeCloseTo(expectedLon, 6);
+
+    const planarGcps = [
+      { pixel: [0, 0], geo: [0, 0] },
+      { pixel: [1, 1], geo: [300, 400] },
+    ] as const;
+    expect(computeObservationScale(planarGcps, planar)).toBe(500);
+    expect(
+      computeObservationScale(planarGcps, { kind: 'planar_xy', axisOrder: 'xy', unit: 'ft' }),
+    ).toBeCloseTo(500 * 0.3048, 9);
+  });
+
+  it('basicRmsFromFit: sseSimilarity 優先、similarityOnly の fallback、契約違反の null', () => {
+    const base = {
+      status: 'ok_with_warnings' as const,
+      qualityGate: 'adoptable' as const,
+      worldFile: { xScale: 1, xSkew: 0, xOrigin: 0, ySkew: 0, yScale: 1, yOrigin: 0 },
+      warnings: [],
+    };
+    expect(basicRmsFromFit({ ...base, similarityOnly: false, rmsMeters: 1, debug: { sse: 1, mse: 0.25, sseSimilarity: 16 } }, 4)).toBe(2);
+    expect(basicRmsFromFit({ ...base, similarityOnly: true, rmsMeters: 3 }, 4)).toBe(3);
+    // similarityOnly=false なのに有限な sseSimilarity が無い -> dependency-contract-failure
+    expect(basicRmsFromFit({ ...base, similarityOnly: false, rmsMeters: 3 }, 4)).toBeNull();
+    expect(basicRmsFromFit({ ...base, similarityOnly: true, rmsMeters: null }, 4)).toBeNull();
   });
 });

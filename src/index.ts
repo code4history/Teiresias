@@ -5,6 +5,8 @@
  * ranking / status 導出の内部 helper は**ここから公開しない**（設計 §5.4 / K14）。
  * テストは `../src/estimate-crs.js` を直接 import して内部 helper を検証する。
  */
+export { estimateCrs } from './estimate-crs.js';
+
 export type {
   CandidateCrs,
   CandidateTransformer,

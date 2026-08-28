@@ -109,6 +109,25 @@ describe('AC-m1-1: runtime dependency と公開 surface', () => {
     expect(packageJson.type).toBe('module');
   });
 
+  it('公開 root export の runtime surface は estimateCrs だけで、内部 helper を漏出させない', async () => {
+    const publicModule = await import('../src/index.js');
+    expect(Object.keys(publicModule).sort()).toEqual(['estimateCrs']);
+
+    // 内部 helper は ../src/estimate-crs.js からのみ到達できる（package root に載せない）
+    const internals = await import('../src/estimate-crs.js');
+    expect(Object.keys(internals).sort()).toEqual([
+      'areScoresTied',
+      'basicRmsFromFit',
+      'computeObservationScale',
+      'deriveSuccessStatus',
+      'deriveTopLevelStatus',
+      'estimateCrs',
+      'normalizeEpsilonMeters',
+      'normalizePositiveInteger',
+      'rankCandidates',
+    ]);
+  });
+
   it('@c4h/daedalus は package の public root として解決でき、testkit は解決できない', async () => {
     const daedalus = await import('@c4h/daedalus');
     expect(typeof daedalus.fitWorldFile).toBe('function');
