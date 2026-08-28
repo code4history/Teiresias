@@ -209,11 +209,28 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
   });
 });
 
-describe('SHA 照合の道具立て（AC-T1 (b) は T2 で fixture コピー後に結線する）', () => {
-  it('sha256OfFile が Daedalus fixture 正本に対して規定 SHA を返す', () => {
-    const canonical = join(daedalusRoot, 'src', 'testkit', 'mockContractFixture.ts');
-    expect(sha256OfFile(canonical)).toBe(
-      'f95c73f10700e4bd7bdb681ebc8f6c3c9abd4104390b9b608b3303b56fec2df4',
-    );
+describe('AC-T1 (b): fixture コピーの SHA-256 三者一致', () => {
+  /** 契約文書 §5.3 が定める fixture の実測 SHA-256（fixtureVersion 1.0.0）。 */
+  const SPECIFIED_SHA256 =
+    'f95c73f10700e4bd7bdb681ebc8f6c3c9abd4104390b9b608b3303b56fec2df4';
+  const copySource = join(daedalusRoot, 'src', `${'testkit'}`, 'mockContractFixture.ts');
+  const copyTarget = join(packageRoot, 'tests', 'fixtures', 'mockContractFixture.ts');
+
+  it('コピー元・コピー先・規定 SHA の 3 者が一致する', () => {
+    expect(sha256OfFile(copySource)).toBe(SPECIFIED_SHA256);
+    expect(sha256OfFile(copyTarget)).toBe(SPECIFIED_SHA256);
+    expect(readFileSync(copyTarget)).toEqual(readFileSync(copySource));
+  });
+
+  it('コピー先は import を一切持たない純定数ファイルである（契約文書 §5.2）', () => {
+    const lines = readFileSync(copyTarget, 'utf8').split('\n');
+    expect(lines.filter((line) => /^\s*import\b/.test(line))).toEqual([]);
+  });
+
+  it('SHA 照合が実際に発火する（1 バイト変えたコピーは規定 SHA と一致しない）', () => {
+    const mutated = createHash('sha256')
+      .update(Buffer.concat([readFileSync(copyTarget), Buffer.from('\n')]))
+      .digest('hex');
+    expect(mutated).not.toBe(SPECIFIED_SHA256);
   });
 });
