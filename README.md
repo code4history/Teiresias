@@ -37,8 +37,9 @@ const result: EstimationResult = await estimateCrs(gcps, candidates, {
 
 ### `CandidateTransformer` の契約
 
-契約の正本は親リポジトリの `docs/superpowers/specs/2026-08-28-mock-transformer-contract.md` である。
-要点は次のとおり。
+契約の正本は親リポジトリの
+[`docs/superpowers/specs/2026-08-28-mock-transformer-contract.md`](../docs/superpowers/specs/2026-08-28-mock-transformer-contract.md)
+である。要点は次のとおり。
 
 | # | 契約 |
 |---|---|
@@ -116,7 +117,8 @@ final RMS を別名で公開する API 拡張は Cycle 1 では行っていな�
 - **単位**: 成功候補の transformer 出力は metre 固定。foot / native unit の扱いは未対応である。
 - **未対応**: inverse 変換による geodesic RMS、アンチメリディアン、極域、epoch / grid provenance、
   robust / weight / LOO / bootstrap、進捗 callback、並列候補処理、キャンセル。
-- **配布**: 本 package は `private: true` のままであり、npm 公開の判断は行っていない。
+- **配布**: 本 package は `private: true` のままである。**Cycle 1 では publish しない**という判断を
+  記録した（理由と post-cycle への申し送りは仮仕様正本の license / publish 節を参照）。
   `@c4h/daedalus` はローカル sibling の `link:../Daedalus` で解決している。publish 時に
   semver 依存へ切り替えるかどうかは未決である。
 
@@ -134,3 +136,14 @@ pnpm --ignore-workspace run coverage
 `@c4h/daedalus` は `dist` を exports 経由で解決するため、先に Daedalus を build しておくこと。
 親リポジトリの worktree では、素の `pnpm run <script>` が親の `pnpm-lock.yaml` を縮退再生成する
 ため、**必ず `--ignore-workspace` を付ける**こと。
+
+## 関連文書
+
+- [CRS 推定ライブラリ群 仮仕様正本](../docs/superpowers/specs/2026-08-27-c1-crs-libs-provisional-spec.md) —
+  本 package の観測契約・ranking・保存境界・検証範囲が集約されている（**仮仕様**であり
+  人間承認済みの確定仕様ではない）。
+- [mock transformer 契約文書](../docs/superpowers/specs/2026-08-28-mock-transformer-contract.md) —
+  `CandidateTransformer` 契約の正本。
+
+上記リンクは**親リポジトリ（monorepo）を checkout したときにのみ解決する**。
+本 repository を単体で clone した場合、`../docs/` は存在しない。
