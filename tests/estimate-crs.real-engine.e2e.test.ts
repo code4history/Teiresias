@@ -286,6 +286,24 @@ function expectRelativeClose(actual: number, expected: number, relativeTolerance
   expect(Math.abs(actual - expected) / Math.abs(expected)).toBeLessThan(relativeTolerance);
 }
 
+/**
+ * 2 つの点列の「最大差」（点ごとのユークリッド距離の最大値・m）。
+ *
+ * 設計 §3.5.1 / AC-14 の `13.639282286267992` m はこの定義で測られている
+ * （成分ごとの最大差では `12.931680195499212` m になり別の量になる。実装時に両方を測って
+ * 設計時プローブ値を全桁再現する側を採った）。
+ */
+function maxPointDistance(
+  left: ReadonlyArray<readonly [number, number]>,
+  right: ReadonlyArray<readonly [number, number]>,
+): number {
+  let max = 0;
+  for (let index = 0; index < left.length; index += 1) {
+    max = Math.max(max, Math.hypot(left[index][0] - right[index][0], left[index][1] - right[index][1]));
+  }
+  return max;
+}
+
 function rmsOf(result: EstimationResult, id: string): number {
   const found = result.ranked.find((entry) => `${entry.authority}:${entry.code}` === id);
   if (found === undefined) throw new Error(`ranked に ${id} が無い`);
@@ -428,17 +446,29 @@ describe('m2a-t1/AC-7: 実測固定 — 反射が候補弁別に与える影響�
    *   必要 `1.5e-6` / 採用 **`1e-3` 相対**（旧 `1e-6` は **−0.16 桁**で不足していた）
    *   下限余裕 **2.84 桁** / 上限余裕 2.5 桁（2 値は互いに 69% 離れている ∴ 混同しない）
    */
+  /**
+   * 焼いてある値は**実 `estimateCrs` の出力を実装時に測ったもの**である（§14 implementer 6）。
+   * 設計 §3.5.2 / §3.5.4 の値は Daedalus 本体を通していない設計時プローブだが、実測の結果
+   * **全桁一致した**（差分そのものが診断情報になるため、一致したことも記録する）。
+   *
+   * assert しない観測値（K10 の観測義務。task-state へも転記する）:
+   *   反射なし 真値と次点の RMS 比 = `48930765283.00024`（= `4.8930765283e+10`）
+   *   反射あり 真値と次点の RMS 比 = `1.0001996425990132`
+   *   反射なし 2 位・3 位の相対差   = `0.29994918928…`（表 #7 の基準値 `2.9994918928e-1` と一致）
+   *   反射あり 2 位・3 位の相対差   = `5.7193205293576197e-11`（表 #8 の `5.7193205290e-11` と一致）
+   *   反射あり / 反射なし の真値 RMS 劣化倍率 = `2105981679627254.5`（≈ `2.11e+15`）
+   */
   const FORWARD_RMS_6674_UPPER_BOUND_METERS = 1e-6; // #1（絶対・上限のみ）
-  const FORWARD_RMS_6675 = 3.5823637746029902e-1; // #2
-  const FORWARD_RMS_6673 = 5.1172910876252709e-1; // #3
-  const REFLECTED_RMS_6674 = 1.5418504974201469e4; // #4
-  const REFLECTED_RMS_6673 = 1.5421583164607415e4; // #5
-  const REFLECTED_RMS_6675 = 1.5421583165489425e4; // #6
+  const FORWARD_RMS_6675 = 0.358236377460299; // #2（実測）
+  const FORWARD_RMS_6673 = 0.5117291087625271; // #3（実測）
+  const REFLECTED_RMS_6674 = 15418.504974201469; // #4（実測）
+  const REFLECTED_RMS_6673 = 15421.583164607415; // #5（実測）
+  const REFLECTED_RMS_6675 = 15421.583165489425; // #6（実測）
   const NON_EXACT_FIT_RELATIVE_TOLERANCE = 1e-3; // #2 / #3
   const REFLECTED_RELATIVE_TOLERANCE = 1e-6; // #4 / #5 / #6
   const DEFAULT_CATALOG_RELATIVE_TOLERANCE = 1e-3; // #11 / #12
-  const RELATIVE_DIFF_3094 = 3.6120844592e-4; // #11
-  const RELATIVE_DIFF_30166 = 1.1252316755e-4; // #12
+  const RELATIVE_DIFF_3094 = 0.0003612084459245531; // #11（実測）
+  const RELATIVE_DIFF_30166 = 0.00011252316754670682; // #12（実測）
 
   async function runThreeSet(reflectedSet: boolean): Promise<EstimationResult> {
     const candidates = pickById(await catalogWide(), REQUIRED_IDS);
@@ -481,10 +511,13 @@ describe('m2a-t1/AC-7: 実測固定 — 反射が候補弁別に与える影響�
     const forwardResult = await runThreeSet(false);
     const reflectedResult = await runThreeSet(true);
 
+    // 「相対差」は設計 §3.5.2 / §3.5.4 #7 / #8 と同じ定義（差 ÷ 大きいほう = 3 位の値）を採る。
+    // 実測: 反射なし 0.29994918928…（表 #7 の 2.9994918928e-1 と一致）/
+    //       反射あり 5.7193205293576197e-11（表 #8 の 5.7193205290e-11 と一致）
     const relativeGap = (result: EstimationResult): number => {
       const second = result.ranked[1].rmsMeters;
       const third = result.ranked[2].rmsMeters;
-      return Math.abs(third - second) / Math.abs(second);
+      return Math.abs(third - second) / Math.max(Math.abs(second), Math.abs(third));
     };
 
     // 反射なしでは 2 位・3 位が頑健に分離する
@@ -673,13 +706,7 @@ describe('m2a-t1/AC-14: 実測固定 — PROJ-5 文字列が同一へ潰れる a
 
     let maxDiff = 0;
     for (let i = 1; i < projected.length; i += 1) {
-      for (let p = 0; p < GCP_LONLAT.length; p += 1) {
-        maxDiff = Math.max(
-          maxDiff,
-          Math.abs(projected[i][p][0] - projected[0][p][0]),
-          Math.abs(projected[i][p][1] - projected[0][p][1]),
-        );
-      }
+      maxDiff = Math.max(maxDiff, maxPointDistance(projected[0], projected[i]));
     }
     expect(maxDiff).toBe(0);
   });
@@ -693,10 +720,10 @@ describe('m2a-t1/AC-14: 実測固定 — PROJ-5 文字列が同一へ潰れる a
 
     const a = (await transformLonLatArrayToProjected(truth, GCP_LONLAT)) as Array<[number, number]>;
     const b = (await transformLonLatArrayToProjected(bessel, GCP_LONLAT)) as Array<[number, number]>;
-    let maxDiff = 0;
-    for (let p = 0; p < GCP_LONLAT.length; p += 1) {
-      maxDiff = Math.max(maxDiff, Math.abs(a[p][0] - b[p][0]), Math.abs(a[p][1] - b[p][1]));
-    }
-    expectRelativeClose(maxDiff, DIFF_TO_30166_METERS, DEGENERATE_DIFF_RELATIVE_TOLERANCE);
+    expectRelativeClose(
+      maxPointDistance(a, b),
+      DIFF_TO_30166_METERS,
+      DEGENERATE_DIFF_RELATIVE_TOLERANCE,
+    );
   });
 });

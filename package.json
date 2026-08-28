@@ -29,6 +29,7 @@
     "@c4h/daedalus": "link:../Daedalus"
   },
   "devDependencies": {
+    "@c4h/atlas": "link:../Atlas",
     "@types/node": "^25.5.2",
     "@vitest/coverage-v8": "^3.2.6",
     "typescript": "^5.9.3",

@@ -12,6 +12,9 @@ importers:
         specifier: link:../Daedalus
         version: link:../Daedalus
     devDependencies:
+      '@c4h/atlas':
+        specifier: link:../Atlas
+        version: link:../Atlas
       '@types/node':
         specifier: ^25.5.2
         version: 25.9.5
