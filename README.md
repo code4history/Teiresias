@@ -1,139 +1,160 @@
 # Teiresias
 
+[![CI](https://github.com/code4history/Teiresias/actions/workflows/test.yml/badge.svg)](https://github.com/code4history/Teiresias/actions/workflows/test.yml)
+
 `@c4h/teiresias` estimates the best CRS and world-file parameters from GCPs and a supplied candidate CRS set.
 
 - Input: GCPs plus candidate CRSs
 - Output: selected CRS plus world-file 6 parameters
-- Runtime: Node.js と browser（bundler = 検証済 ／ 実ブラウザ = 1 回観測済 ／ 継続的・自動のブラウザ実行は未検証。下記「既知の制限」）
+- Runtime: Node.js and browser (bundler = verified / real browser = observed once / continuous, automated browser execution is unverified. See "Known limitations" below)
 - Scope: orchestration over fitting, not DuckDB catalog lookup
 
-## 公開 API
+日本語のREADMEは[こちら](./README.ja.md)。
 
-`package.json` の `exports` は public root `"."` のみである。公開されるのは `estimateCrs` と
-公開型だけで、内部 helper（ranking / status 導出）は公開しない。
+## Public API
+
+The `exports` of `package.json` only exposes the public root `"."`. Only `estimateCrs` and the public
+types are exposed; the internal helpers (ranking / status derivation) are not.
 
 ```ts
 import { estimateCrs } from '@c4h/teiresias';
 import type { CandidateCrs, EstimateOptions, EstimationResult } from '@c4h/teiresias';
 
 const result: EstimationResult = await estimateCrs(gcps, candidates, {
-  transformer,                 // 必須。候補 CRS への変換 adapter
-  geoBasis,                    // 省略時 { kind: 'lonlat_deg', axisOrder: 'lon-lat' }
-  minCandidates,               // 省略時 1
-  topK,                        // 省略時 usable 全件
-  normalizeEpsilonMeters,      // 省略時 100（m）
-  datumFamilyPrior,            // 省略時 中立（prior なし）
+  transformer,                 // required. The adapter that transforms into a candidate CRS
+  geoBasis,                    // defaults to { kind: 'lonlat_deg', axisOrder: 'lon-lat' }
+  minCandidates,               // defaults to 1
+  topK,                        // defaults to all usable candidates
+  normalizeEpsilonMeters,      // defaults to 100 (m)
+  datumFamilyPrior,            // defaults to neutral (no prior)
 });
 ```
 
-`WorldFile` / `GcpPair` / `GeoBasis` / `FitStatus` / `QualityGate` / `FitWarning` /
-`MaybePromise` は `@c4h/daedalus` の公開型を再 export したものであり、Teiresias では再定義しない。
+`WorldFile` / `GcpPair` / `GeoBasis` / `FitStatus` / `QualityGate` / `FitWarning` / `MaybePromise`
+are re-exports of the public types of `@c4h/daedalus`; Teiresias does not redefine them.
 
-### `CandidateCrs` と identity
+### `CandidateCrs` and identity
 
-候補は `{ authority, code, datumFamily? }` の最小構造型で渡す。candidate id は Teiresias が
-`` `${authority}:${code}` `` として 1 箇所で組み立てるため、呼出側が独立した id を渡すことはない。
-`authority` / `code` の空文字は候補失敗、identity の重複は最初の 1 件だけを評価する。
+Candidates are passed as the minimal structural type `{ authority, code, datumFamily? }`. The candidate
+id is assembled by Teiresias in a single place as `` `${authority}:${code}` ``, so the caller never
+passes an independent id. An empty `authority` / `code` makes the candidate fail, and when identities
+are duplicated only the first occurrence is evaluated.
 
-### `CandidateTransformer` の契約
+### The contract of `CandidateTransformer`
 
-契約の正本は親リポジトリの
+The authoritative source of the contract is
 [`docs/superpowers/specs/2026-08-28-mock-transformer-contract.md`](../docs/superpowers/specs/2026-08-28-mock-transformer-contract.md)
-である。要点は次のとおり。
+in the parent repository. Its key points are as follows.
 
-| # | 契約 |
+| # | contract |
 |---|---|
-| (1) | id は `` `${authority}:${code}` `` |
-| (2) | 入力は `geoBasis` が示す順序の geo 点列（同順） |
-| (3) | 出力は同順同数の projected `[easting, northing]` 点列 |
-| (4) | 空入力は `null`（`[]` を返さない） |
-| (5) | 一点でも非有限 / 変換不能なら全体 `null`（部分成功を返さない） |
-| (6) | 入出力の長さ不一致は adapter contract failure |
-| (7) | 業務的に変換不能な事象は `null`。throw は adapter bug のときだけ |
-| (8) | 同じ id・点列・basis に対して決定的 |
+| (1) | the id is `` `${authority}:${code}` `` |
+| (2) | the input is a sequence of geo points in the order indicated by `geoBasis` (same order) |
+| (3) | the output is a sequence of projected `[easting, northing]` points of the same order and the same length |
+| (4) | an empty input gives `null` (it does not return `[]`) |
+| (5) | if even one point is non-finite / untransformable, the whole result is `null` (no partial success is returned) |
+| (6) | a length mismatch between input and output is an adapter contract failure |
+| (7) | an event that is untransformable in the domain sense gives `null`; a throw only happens for an adapter bug |
+| (8) | it is deterministic for the same id, point sequence and basis |
 
-同期返却と `Promise` 返却の双方が適合する。Teiresias は候補を**入力順に逐次**処理し、
-返却を `await` で正規化する（failure / warning の順序と adapter 呼出し順を決定的にするため）。
+Both synchronous returns and `Promise` returns conform. Teiresias processes the candidates
+**sequentially in input order** and normalizes the returns with `await` (so that the order of
+failures / warnings and the order of adapter calls are deterministic).
 
-Cycle 1 では、transformer の成功出力を **metre の projected `[E, N]`** と解釈する。Teiresias は
-Daedalus へ常に `{ kind: 'planar_xy', axisOrder: 'xy', unit: 'm' }` を渡し、入力側 `geoBasis` を
-そのまま横流ししない。native 単位が metre でない候補の扱いは Cycle 1 の API に存在しない。
+In Cycle 1, a successful transformer output is interpreted as projected `[E, N]` **in metres**.
+Teiresias always passes `{ kind: 'planar_xy', axisOrder: 'xy', unit: 'm' }` to Daedalus and does not
+forward the input-side `geoBasis` as-is. Handling of candidates whose native unit is not the metre does
+not exist in the Cycle 1 API.
 
-## ranking と score
+## Ranking and score
 
-- 順位は **shear 前の basic（similarity）RMS** で決める。Daedalus が最終的に affine を採用し得るため、
-  final RMS を順位に使うと「affine が誤候補を救済して順位を逆転する」ことが起きる。
-- `score = basicRmsMeters / L_geo`。`L_geo` は入力 GCP 全体に共通する観測域スケール（m）であり、
-  同じ推定呼出し内では basic RMS 昇順と同値である。score は観測域に対する相対誤差であり、
-  確率・信頼度ではない。
-- 同着（機械精度内）のときだけ `datumFamilyPrior` の指定順が働く。prior は明確な fit 差を逆転しない。
-  最後は identity の code-unit 順で決定的に閉じる。
+- The order is decided by the **basic (similarity) RMS before shear**. Since Daedalus may finally adopt
+  affine, using the final RMS for the order would make "affine rescues a wrong candidate and inverts the
+  order" happen.
+- `score = basicRmsMeters / L_geo`. `L_geo` is the observation-area scale (m) common to all the input
+  GCPs, so within the same estimation call the score is equivalent to ascending basic RMS. The score is
+  a relative error with respect to the observation area; it is not a probability or a confidence.
+- The order given in `datumFamilyPrior` only takes effect on ties (within machine precision). The prior
+  never inverts a clear difference in fit. Finally the ordering closes deterministically by the code-unit
+  order of the identity.
 
-### `rmsMeters` の意味の違い（重要）
+### The difference in the meaning of `rmsMeters` (important)
 
-| 値 | 意味 |
+| value | meaning |
 |---|---|
-| `ranked[].rmsMeters` / `selected.rmsMeters` | **ranking に用いた shear 前 basic RMS** |
-| `selected.worldFile` / `selected.qualityGate` | **同じ候補に対する Daedalus の最終返却**（affine 採用を含み得る） |
+| `ranked[].rmsMeters` / `selected.rmsMeters` | **the pre-shear basic RMS used for the ranking** |
+| `selected.worldFile` / `selected.qualityGate` | **the final return of Daedalus for the same candidate** (which may include an adopted affine) |
 
-∴ `selected.worldFile` が affine のとき、`selected.rmsMeters` はその worldFile の残差ではない。
-final RMS を別名で公開する API 拡張は Cycle 1 では行っていない。
+Therefore, when `selected.worldFile` is affine, `selected.rmsMeters` is not the residual of that
+worldFile. An API extension that exposes the final RMS under a different name has not been done in
+Cycle 1.
 
-## status と診断
+## Status and diagnostics
 
-| 条件 | `status` | `selected` |
+| condition | `status` | `selected` |
 |---|---|---|
-| usable 件数 >= `minCandidates`、選択候補の warnings 0 件 | `ok` | 先頭候補 |
-| usable 件数 >= `minCandidates`、選択候補の warnings 1 件以上 | `ok_with_warnings` | 先頭候補 |
-| usable 件数 < `minCandidates` | `insufficient` | `null` |
-| usable 0 件で adapter contract failure / adapter bug / dependency contract failure が 1 件以上 | `failed` | `null` |
+| usable count >= `minCandidates`, and the selected candidate has 0 warnings | `ok` | the leading candidate |
+| usable count >= `minCandidates`, and the selected candidate has 1 or more warnings | `ok_with_warnings` | the leading candidate |
+| usable count < `minCandidates` | `insufficient` | `null` |
+| 0 usable candidates and 1 or more adapter contract failures / adapter bugs / dependency contract failures | `failed` | `null` |
 
-最後の 2 条件が重なる場合は、実装失敗を候補不足へ埋没させないため `failed` を優先する。
+When the last two conditions overlap, `failed` takes precedence so that an implementation failure is not
+buried under a shortage of candidates.
 
-- `warnings` は成功時は **selected 候補の Daedalus `FitWarning` だけ**を同順・同形で返す。
-  敗北候補の warning を identity なしで混ぜない。`WarningCode` は Daedalus の凍結 7 値のままで、
-  transformer の失敗を既存 code へ流用しない。
-- `untransformableIds` は **transformer / candidate 入力層の失敗だけ**を候補入力順・重複なしで収容する。
-  Daedalus fitting 層の不足（`insufficient` / `unusable`）とは混ぜない。
-  `ranked` / `selected` の identity と交差しない。
+- On success, `warnings` returns **only the Daedalus `FitWarning`s of the selected candidate**, in the
+  same order and the same shape. The warnings of losing candidates are not mixed in without an identity.
+  `WarningCode` stays at the 7 frozen values of Daedalus, and transformer failures are not diverted into
+  the existing codes.
+- `untransformableIds` collects **only the failures of the transformer / candidate input layer**, in
+  candidate input order and without duplicates. It is not mixed with the shortages of the Daedalus
+  fitting layer (`insufficient` / `unusable`). It does not intersect with the identities of `ranked` /
+  `selected`.
 
-## 保存境界
+## The persistence boundary
 
-`EstimationResult` は**診断返却**である。Editor が明示的に採用した後に永続化してよいのは
-**選択された identity と採用 worldFile だけ**である。
+`EstimationResult` is a **diagnostic return**. What may be persisted after the Editor has explicitly
+adopted it is **only the selected identity and the adopted worldFile**.
 
-`ranked` / `score` / basic RMS / `qualityGate` / `warnings` / `untransformableIds` /
-`selected` object 全体は保存しない。`qualityGate: 'preview'` の返却も同様で、保存・採用の判断は
-ライブラリではなく Editor の責務である。
+`ranked` / `score` / the basic RMS / `qualityGate` / `warnings` / `untransformableIds` and the whole
+`selected` object are not persisted. The same applies to a return with `qualityGate: 'preview'`: the
+decision to persist or adopt is the responsibility of the Editor, not of the library.
 
-## 既知の制限
+## Known limitations
 
-- **browser 検証の 3 段**（m3-t1 で旧「node-only」項を分割した。**行をまたいで実績を流用しない** —
-  bundler の実績で runtime 行を塗らないことは仮仕様正本 §11 が課した規律である）:
-  - **bundler = 検証済**: `pnpm run verify:demo-bundle`（`scripts/verify-demo-browser-bundle.mjs`）が
-    demo build の出力チャンクを走査し、Node 固有指定子が残っていないことと Daedalus 由来コードが
-    実在することを機械検証する。CI（`.github/workflows/{test,deploy}.yml`）から継続的に走る。
-  - **browser runtime = 観測済（「検証済」ではない）**: 2026-08-29 に `demo/crs-estimate-ranking.html`
-    を実ブラウザで開き、proj-wasm の初期化・候補順位・y 軸反転による識別力の消滅・GCP ドラッグによる
-    順位入替を観測した（m3-t1/AC-16）。**1 回の観測であって自動検査ではない ∴ 回帰を守らない。**
-  - **CI 上での継続的・自動のブラウザ実行と canvas ドラッグの自動操作 = 未検証**（Cycle 1 の既知欠落。
-    自動化された貫通 E2E は post-cycle へ申し送った）。
-- **実 engine E2E は接続済み**: `tests/estimate-crs.real-engine.e2e.test.ts` が実 CRS engine
-  （Atlas / proj-wasm）を注入した E2E を持つ（m2a-t1）。mock E2E（`estimate-crs.e2e.test.ts`）は
-  契約の決定的な検証として併存する。⚠️ 旧記述「**実 engine 未接続**: 実 CRS engine の注入は後続タスク」は
-  m2a-t1 マージ後に取り残された stale 記述であり、m3-t1 で是正した。
-- **`status: 'ok'` は現行公開 API から到達不能**: `EstimateOptions` は Daedalus の `holdout` を
-  公開しないため、実 Daedalus の成功 fit は必ず warning を 1 件以上持つ。分岐は `FitStatus` 互換と
-  将来の holdout 対応のために保持し、内部 helper の単体検証で担保している。
-- **単位**: 成功候補の transformer 出力は metre 固定。foot / native unit の扱いは未対応である。
-- **未対応**: inverse 変換による geodesic RMS、アンチメリディアン、極域、epoch / grid provenance、
-  robust / weight / LOO / bootstrap、進捗 callback、並列候補処理、キャンセル。
-- **配布**: 本 package は `private: true` のままである。**Cycle 1 では publish しない**という判断を
-  記録した（理由と post-cycle への申し送りは仮仕様正本の license / publish 節を参照）。
-  `@c4h/daedalus` はローカル sibling の `link:../Daedalus` で解決している。publish 時に
-  semver 依存へ切り替えるかどうかは未決である。
+- **The three tiers of browser verification** (m3-t1 split the former "node-only" item. **Evidence is not
+  carried across the tiers** — not painting the runtime tier with the evidence of the bundler tier is a
+  discipline imposed by §11 of the provisional specification):
+  - **bundler = verified**: `pnpm run verify:demo-bundle` (`scripts/verify-demo-browser-bundle.mjs`)
+    scans the output chunks of the demo build and mechanically verifies that no Node-specific specifier
+    remains and that Daedalus-derived code is actually present. It runs continuously from CI
+    (`.github/workflows/{test,deploy}.yml`).
+  - **browser runtime = observed (not "verified")**: on 2026-08-29, `demo/crs-estimate-ranking.html` was
+    opened in a real browser and the initialization of proj-wasm, the candidate ranking, the loss of
+    discriminating power caused by flipping the y axis, and the reordering caused by dragging a GCP were
+    observed (m3-t1/AC-16). **It is a single observation and not an automated check, so it does not guard
+    against regressions.**
+  - **Continuous, automated browser execution on CI and automated canvas drag operation = unverified**
+    (a known gap of Cycle 1; an automated end-to-end test was handed over to post-cycle).
+- **The real-engine E2E is connected**: `tests/estimate-crs.real-engine.e2e.test.ts` holds an E2E that
+  injects the real CRS engine (Atlas / proj-wasm) (m2a-t1). The mock E2E (`estimate-crs.e2e.test.ts`)
+  coexists with it as a deterministic verification of the contract. The former description
+  "**the real engine is not connected**: injecting the real CRS engine is a follow-up task" was a stale
+  description left behind after the m2a-t1 merge, and it was corrected in m3-t1.
+- **`status: 'ok'` is unreachable from the current public API**: since `EstimateOptions` does not expose
+  the `holdout` of Daedalus, a successful fit of the real Daedalus always has at least one warning. The
+  branch is kept for `FitStatus` compatibility and for future holdout support, and it is covered by unit
+  verification of the internal helper.
+- **Units**: the transformer output of a successful candidate is fixed to metres. Handling of feet /
+  native units is not supported.
+- **Not supported**: geodesic RMS through the inverse transformation, the antimeridian, polar regions,
+  epoch / grid provenance, robust / weight / LOO / bootstrap, progress callbacks, parallel candidate
+  processing, and cancellation.
+- **Distribution**: this package remains `private: true`. The decision **not to publish in Cycle 1** is
+  recorded (for the reason and the handover to post-cycle, see the license / publish section of the
+  provisional specification). `@c4h/daedalus` is resolved through the local sibling `link:../Daedalus`.
+  Whether to switch to a semver dependency at publish time is undecided.
 
-## 開発
+## Development
 
 ```bash
 pnpm --ignore-workspace install --ignore-scripts
@@ -144,38 +165,43 @@ pnpm --ignore-workspace run build
 pnpm --ignore-workspace run coverage
 ```
 
-`@c4h/daedalus` は `dist` を exports 経由で解決するため、先に Daedalus を build しておくこと。
-親リポジトリの worktree では、素の `pnpm run <script>` が親の `pnpm-lock.yaml` を縮退再生成する
-ため、**必ず `--ignore-workspace` を付ける**こと。
+Because `@c4h/daedalus` resolves `dist` through its exports, build Daedalus first. In a worktree of the
+parent repository, a bare `pnpm run <script>` regenerates the parent `pnpm-lock.yaml` in a degenerate
+form, so **always add `--ignore-workspace`**.
 
-### デモ（m3-t1）
+### Demo (m3-t1)
 
-`demo/crs-estimate-ranking.html` は、`Atlas`（投影）→ `Daedalus`（当てはめ）→ `Teiresias`
-（順位づけ）の推定パイプラインをブラウザで触れるデモである。`@c4h/atlas` の `dist` を解決する
-ため、**先に Atlas も build しておくこと**。
+`demo/crs-estimate-ranking.html` is a demo that lets you touch the estimation pipeline
+`Atlas` (projection) → `Daedalus` (fitting) → `Teiresias` (ranking) in a browser. Because it resolves
+the `dist` of `@c4h/atlas`, **build Atlas first as well**.
 
 ```bash
-# 開発サーバ
+# development server
 pnpm --ignore-workspace run dev
 
-# Pages 成果物のビルドと検証（GITHUB_PAGES=true で base が /Teiresias/ になる）
+# build and verify the Pages artifact (GITHUB_PAGES=true makes the base /Teiresias/)
 pnpm --ignore-workspace run verify:demo
 pnpm --ignore-workspace run verify:demo-bundle
 
-# 手元のブラウザで確認する（base が "/" のビルドと対で使う）
+# check it in a local browser (use it together with a build whose base is "/")
 pnpm --ignore-workspace run build:demo
 pnpm --ignore-workspace run preview
 ```
 
-proj-wasm は Worker と WASM を読むため、**`file://` では動かない**（HTTP で配信すること）。
+Because proj-wasm loads a Worker and a WASM binary, **it does not work over `file://`** (serve it over HTTP).
 
-## 関連文書
+## Related documents
 
-- [CRS 推定ライブラリ群 仮仕様正本](../docs/superpowers/specs/2026-08-27-c1-crs-libs-provisional-spec.md) —
-  本 package の観測契約・ranking・保存境界・検証範囲が集約されている（**仮仕様**であり
-  人間承認済みの確定仕様ではない）。
-- [mock transformer 契約文書](../docs/superpowers/specs/2026-08-28-mock-transformer-contract.md) —
-  `CandidateTransformer` 契約の正本。
+- [Provisional specification of the CRS estimation libraries](../docs/superpowers/specs/2026-08-27-c1-crs-libs-provisional-spec.md) —
+  the observation contract, the ranking, the persistence boundary and the verification scope of this
+  package are collected there (it is a **provisional specification**, not a finalized specification
+  approved by a human).
+- [Mock transformer contract](../docs/superpowers/specs/2026-08-28-mock-transformer-contract.md) —
+  the authoritative source of the `CandidateTransformer` contract.
 
-上記リンクは**親リポジトリ（monorepo）を checkout したときにのみ解決する**。
-本 repository を単体で clone した場合、`../docs/` は存在しない。
+The links above **resolve only when the parent repository (the monorepo) is checked out**.
+When this repository is cloned on its own, `../docs/` does not exist.
+
+## License
+
+MIT License. See [LICENSE](./LICENSE).

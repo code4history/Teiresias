@@ -1,6 +1,6 @@
 {
   "name": "@c4h/teiresias",
-  "version": "0.0.0",
+  "version": "0.0.1",
   "private": true,
   "type": "module",
   "main": "./dist/index.js",
@@ -13,8 +13,17 @@
     }
   },
   "description": "CRS and world-file estimator for Maplat V3.1.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/code4history/Teiresias.git"
+  },
   "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/code4history/Teiresias/issues"
+  },
+  "homepage": "https://code4history.github.io/Teiresias/",
   "engines": {
+    "pnpm": ">=10",
     "node": ">=20"
   },
   "scripts": {

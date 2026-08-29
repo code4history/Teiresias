@@ -258,3 +258,45 @@ describe('m3-t1/AC-12: ワークフローの静的検査（CI の検証ではな
     expect(daedalusCi).not.toContain('repository: code4history/');
   });
 });
+
+/**
+ * m3-t2/K13（ADR-0013: 公開 README は英語正・日本語ミラーの 2 本体制）と
+ * m3-t2/K12（README のライセンス表記を実ライセンスに合わせる）を **repo 内で閉じる形**で固定する。
+ * outer の `scripts/m2b-t1/verify-crs-docs.mjs` は private な monorepo の中にしかない ∴
+ * 分離後の公開リポジトリ単体でも走る検査をここへ置く（設計 §4.4.4 の検査置き場所の表）。
+ */
+describe('README 体制と license 表記（m3-t2）', () => {
+  it('英日 2 本の README が実在し、相互の言語切替リンクを持つ', async () => {
+    await access(join(packageRoot, 'README.md'));
+    await access(join(packageRoot, 'README.ja.md'));
+
+    const readme = await readText('README.md');
+    const readmeJa = await readText('README.ja.md');
+
+    expect(readme).toContain('](./README.ja.md)');
+    expect(readmeJa).toContain('](./README.md)');
+  });
+
+  it('README ×2 が package.json / LICENSE と同じ MIT を表示する', async () => {
+    const packageJson = JSON.parse(await readText('package.json')) as { license?: string };
+    const license = await readText('LICENSE');
+
+    expect(packageJson.license).toBe('MIT');
+    expect(license).toContain('MIT License');
+
+    // ⚠️ 禁止語をソースへ**逐語で置かない**（連結して組み立てる）。m3-t2/AC-6 は「3 repo 全域で
+    // 当該語が 0 件」を走査で固定する ∴ 検査の実装元が自分でヒットすると、走査は「検査が存在すること」を
+    // 欠陥として数えてしまう。ファイルごと走査から除外するより、実装元だけを走査面から外すこの形の方が、
+    // 同ファイルの他の行に対する走査を弱めない（nayuta-implementer H-9）。
+    const forbiddenLicenseNames = ['maplat ' + 'limited', 'limited ' + 'license'];
+
+    for (const name of ['README.md', 'README.ja.md']) {
+      const text = await readText(name);
+      expect(text, `${name}: MIT 表記`).toContain('MIT License');
+      expect(text, `${name}: LICENSE への参照`).toContain('[LICENSE](./LICENSE)');
+      for (const forbidden of forbiddenLicenseNames) {
+        expect(text.toLowerCase(), `${name}: 制限ライセンス名の残存`).not.toContain(forbidden);
+      }
+    }
+  });
+});
