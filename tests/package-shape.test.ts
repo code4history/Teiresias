@@ -207,6 +207,38 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
   });
 
   /**
+   * m3-t1/AC-8（設計 v1.3 §6.1 / §2 #17）。
+   *
+   * デモのビルド経路（`dev` / `build:demo` / `verify:demo` / `verify:demo-bundle`）と
+   * 観測経路（`preview` = m3-t1/AC-16 の起動経路）を **5 キー**として機械固定する。
+   * `toMatchObject` はキー追加では壊れない ∴ 追加した側を明示 assert する
+   * （`outer rule-0012` の趣旨。結線の存在を検査から辿れるようにする）。
+   */
+  it('デモの build / verify / preview script が 5 キー結線されている（m3-t1/AC-8）', () => {
+    expect(packageJson.scripts).toMatchObject({
+      dev: 'vite --host',
+      'build:demo': 'vite build',
+      preview: 'vite preview',
+    });
+    expect(packageJson.scripts['verify:demo']).toContain('verify-demo-pages-build.mjs');
+    expect(packageJson.scripts['verify:demo']).toContain('GITHUB_PAGES=true');
+    expect(packageJson.scripts['verify:demo-bundle']).toContain('verify-demo-browser-bundle.mjs');
+  });
+
+  /**
+   * m3-t1/AC-8。デモのビルド・検証に必要な 3 件は **devDependencies にだけ**入れる。
+   * `proj-wasm` を `dependencies` へ入れると Teiresias の公開 package が engine に
+   * 依存することになり【C7】が package の形として破れる（設計 §6.1）。
+   */
+  it('デモ用 devDependencies 3 件が入り、dependencies は増えていない（m3-t1/AC-8）', () => {
+    expect(packageJson.devDependencies.vite).toBeTypeOf('string');
+    expect(packageJson.devDependencies['proj-wasm']).toBeTypeOf('string');
+    expect(packageJson.devDependencies.jsdom).toBeTypeOf('string');
+    expect(packageJson.dependencies['proj-wasm']).toBeUndefined();
+    expect(packageJson.dependencies.vite).toBeUndefined();
+  });
+
+  /**
    * m2a-t1: Atlas 型契約（AC-1(a)）の検査経路を結線する（`outer rule-0012`）。
    *
    * `test:types` は `moduleResolution NodeNext` であり、Atlas の `dist/*.d.ts` が相対 import を
@@ -248,7 +280,7 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
     expect(tsconfigJson.compilerOptions.strict).toBe(true);
   });
 
-  it('build 成果物 dist に tests / fixtures / testkit が存在しない', () => {
+  it('build 成果物 dist に tests / fixtures / testkit / demo が存在しない', () => {
     const distDir = join(packageRoot, 'dist');
     if (!existsSync(distDir) || !statSync(distDir).isDirectory()) {
       // build 前に test を走らせた場合。§8.1 の順序では build 後にもう一度 test を回し、
@@ -259,7 +291,11 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
     const distFiles = listFilesRecursively(distDir).map((file) => relative(distDir, file));
     expect(distFiles.length).toBeGreaterThan(0);
     expect(
-      distFiles.filter((file) => /(^|\/)(tests?|fixtures|testkit)(\/|$)/.test(file)),
+      // m3-t1/AC-8（設計 §4.4）: `demo` を needle へ追加する。`demo/` は `@c4h/atlas` を
+      // import する ∴ dist へ混入すると【C7】（Teiresias が engine を直参照しない）が
+      // 公開 package の形として破れる。tsconfig の `include: ["src/**/*"]` により構造上
+      // 入らないが、**入らないことを機械で固定する**（被影響への追随ではなく追加である）。
+      distFiles.filter((file) => /(^|\/)(tests?|fixtures|testkit|demo)(\/|$)/.test(file)),
     ).toEqual([]);
   });
 
@@ -269,8 +305,17 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
       .map((line) => line.trim())
       .filter((line) => line !== '');
     // m2a-t1: MIN-IR-3（m1-t1 からの持ち越し）で `coverage/` を追加した。
+    // m3-t1: デモの生成物 `dist-demo/` と作業領域 `.tmp/` を追加した（設計 §2 #18。
+    // `outer rule-0015` — 期待値を無効化する変更は同じ変更で spec を追随させる）。
     // 完全一致 assert のまま追随させる（順不同集合へ緩めない。生成物除外の全数固定を保つ）。
-    expect(ignored).toEqual(['node_modules/', 'dist/', 'coverage/', '*.tsbuildinfo']);
+    expect(ignored).toEqual([
+      'node_modules/',
+      'dist/',
+      'coverage/',
+      '*.tsbuildinfo',
+      'dist-demo/',
+      '.tmp/',
+    ]);
   });
 });
 

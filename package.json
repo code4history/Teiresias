@@ -24,7 +24,12 @@
     "test:types": "tsc --noEmit --strict --target ES2022 --module NodeNext --moduleResolution NodeNext --skipLibCheck tests/api-smoke.test.ts",
     "test:types:atlas": "tsc --noEmit --strict --target ES2022 --module ESNext --moduleResolution Bundler --skipLibCheck tests/api-smoke.test.ts",
     "test:watch": "vitest",
-    "coverage": "vitest run --coverage"
+    "coverage": "vitest run --coverage",
+    "dev": "vite --host",
+    "build:demo": "vite build",
+    "preview": "vite preview",
+    "verify:demo": "GITHUB_PAGES=true pnpm run build:demo && node scripts/verify-demo-pages-build.mjs",
+    "verify:demo-bundle": "node scripts/verify-demo-browser-bundle.mjs"
   },
   "dependencies": {
     "@c4h/daedalus": "link:../Daedalus"
@@ -33,7 +38,10 @@
     "@c4h/atlas": "link:../Atlas",
     "@types/node": "^25.5.2",
     "@vitest/coverage-v8": "^3.2.6",
+    "jsdom": "^30.0.0",
+    "proj-wasm": "0.1.0-alpha8",
     "typescript": "^5.9.3",
+    "vite": "^7.3.1",
     "vitest": "^3.2.6"
   }
 }
