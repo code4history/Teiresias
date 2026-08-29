@@ -1,0 +1,72 @@
+name: CI
+
+# ブランチ非限定（Atlas 前例と同一）∴ branches キーを持たない。
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+    steps:
+      # 兄弟 checkout（設計 §6.4 / K10）。deploy.yml と同一構成である。
+      - uses: actions/checkout@v4
+        with:
+          path: Teiresias
+      - uses: actions/checkout@v4
+        with:
+          repository: code4history/Daedalus
+          ref: master
+          path: Daedalus
+      - uses: actions/checkout@v4
+        with:
+          repository: code4history/Atlas
+          ref: master
+          path: Atlas
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          cache-dependency-path: |
+            Teiresias/pnpm-lock.yaml
+            Atlas/pnpm-lock.yaml
+            Daedalus/pnpm-lock.yaml
+
+      - name: Build Daedalus
+        working-directory: Daedalus
+        run: pnpm install && pnpm run build
+      - name: Build Atlas
+        working-directory: Atlas
+        run: pnpm install && pnpm run build
+
+      - name: Install dependencies
+        working-directory: Teiresias
+        run: pnpm install
+      - name: Run tests
+        working-directory: Teiresias
+        run: pnpm run test
+      - name: Run typecheck
+        working-directory: Teiresias
+        run: pnpm run typecheck
+      - name: Check public type surface
+        working-directory: Teiresias
+        run: pnpm run test:types
+      - name: Check Atlas type contract
+        working-directory: Teiresias
+        run: pnpm run test:types:atlas
+      - name: Build package
+        working-directory: Teiresias
+        run: pnpm run build
+      - name: Verify demo Pages artifact
+        working-directory: Teiresias
+        run: pnpm run verify:demo
+      - name: Verify browser bundle
+        working-directory: Teiresias
+        run: pnpm run verify:demo-bundle

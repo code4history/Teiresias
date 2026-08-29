@@ -1,0 +1,81 @@
+name: Deploy to GitHub Pages
+
+# 起動ブランチは master（C4H 標準。HR-m3-007）。
+on:
+  push:
+    branches:
+      - master
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      # `@c4h/daedalus` / `@c4h/atlas` は link: 依存である（m1-t1 の選択）∴ 独立リポジトリを
+      # 単体 checkout しただけでは `../Daedalus` / `../Atlas` が存在せず pnpm install が落ちる。
+      # 本体を $GITHUB_WORKSPACE のサブディレクトリへ置き、兄弟リポジトリを同階層へ並べる
+      # （m3-t1 設計 §6.4 / K10）。3 repo とも public ∴ 既定の GITHUB_TOKEN で checkout できる。
+      - uses: actions/checkout@v4
+        with:
+          path: Teiresias
+      - uses: actions/checkout@v4
+        with:
+          repository: code4history/Daedalus
+          ref: master
+          path: Daedalus
+      - uses: actions/checkout@v4
+        with:
+          repository: code4history/Atlas
+          ref: master
+          path: Atlas
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v4
+        with:
+          version: 10
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: pnpm
+          # 兄弟 checkout 構成では $GITHUB_WORKSPACE 直下に lockfile が 1 つも無い ∴
+          # cache: pnpm は既定の解決に失敗する。3 本を明示する（設計 §6.5 / K23）。
+          cache-dependency-path: |
+            Teiresias/pnpm-lock.yaml
+            Atlas/pnpm-lock.yaml
+            Daedalus/pnpm-lock.yaml
+
+      # exports が dist を指すため、消費側より先に build する（両 repo とも dist は untracked）。
+      - name: Build Daedalus
+        working-directory: Daedalus
+        run: pnpm install && pnpm run build
+      - name: Build Atlas
+        working-directory: Atlas
+        run: pnpm install && pnpm run build
+
+      - name: Install dependencies
+        working-directory: Teiresias
+        run: pnpm install
+      - name: Build and verify demo site
+        working-directory: Teiresias
+        run: pnpm run verify:demo
+      - name: Verify browser bundle
+        working-directory: Teiresias
+        run: pnpm run verify:demo-bundle
+
+      - name: Setup Pages
+        uses: actions/configure-pages@v5
+      - name: Upload artifact
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: ./Teiresias/dist-demo
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v4
