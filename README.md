@@ -4,7 +4,7 @@
 
 - Input: GCPs plus candidate CRSs
 - Output: selected CRS plus world-file 6 parameters
-- Runtime: Node.js（browser runtime は未検証。下記「既知の制限」）
+- Runtime: Node.js と browser（bundler = 検証済 ／ 実ブラウザ = 1 回観測済 ／ 継続的・自動のブラウザ実行は未検証。下記「既知の制限」）
 - Scope: orchestration over fitting, not DuckDB catalog lookup
 
 ## 公開 API
@@ -108,9 +108,20 @@ final RMS を別名で公開する API 拡張は Cycle 1 では行っていな�
 
 ## 既知の制限
 
-- **node-only**: 検証は Node.js の Vitest で行っている。browser runtime / bundler は未検証である。
-- **実 engine 未接続**: 現状の E2E は Teiresias 所有の deterministic mock による。実 CRS engine
-  （Atlas）の注入は後続タスクであり、mock E2E は実 engine E2E を代替しない。
+- **browser 検証の 3 段**（m3-t1 で旧「node-only」項を分割した。**行をまたいで実績を流用しない** —
+  bundler の実績で runtime 行を塗らないことは仮仕様正本 §11 が課した規律である）:
+  - **bundler = 検証済**: `pnpm run verify:demo-bundle`（`scripts/verify-demo-browser-bundle.mjs`）が
+    demo build の出力チャンクを走査し、Node 固有指定子が残っていないことと Daedalus 由来コードが
+    実在することを機械検証する。CI（`.github/workflows/{test,deploy}.yml`）から継続的に走る。
+  - **browser runtime = 観測済（「検証済」ではない）**: 2026-08-29 に `demo/crs-estimate-ranking.html`
+    を実ブラウザで開き、proj-wasm の初期化・候補順位・y 軸反転による識別力の消滅・GCP ドラッグによる
+    順位入替を観測した（m3-t1/AC-16）。**1 回の観測であって自動検査ではない ∴ 回帰を守らない。**
+  - **CI 上での継続的・自動のブラウザ実行と canvas ドラッグの自動操作 = 未検証**（Cycle 1 の既知欠落。
+    自動化された貫通 E2E は post-cycle へ申し送った）。
+- **実 engine E2E は接続済み**: `tests/estimate-crs.real-engine.e2e.test.ts` が実 CRS engine
+  （Atlas / proj-wasm）を注入した E2E を持つ（m2a-t1）。mock E2E（`estimate-crs.e2e.test.ts`）は
+  契約の決定的な検証として併存する。⚠️ 旧記述「**実 engine 未接続**: 実 CRS engine の注入は後続タスク」は
+  m2a-t1 マージ後に取り残された stale 記述であり、m3-t1 で是正した。
 - **`status: 'ok'` は現行公開 API から到達不能**: `EstimateOptions` は Daedalus の `holdout` を
   公開しないため、実 Daedalus の成功 fit は必ず warning を 1 件以上持つ。分岐は `FitStatus` 互換と
   将来の holdout 対応のために保持し、内部 helper の単体検証で担保している。
@@ -136,6 +147,27 @@ pnpm --ignore-workspace run coverage
 `@c4h/daedalus` は `dist` を exports 経由で解決するため、先に Daedalus を build しておくこと。
 親リポジトリの worktree では、素の `pnpm run <script>` が親の `pnpm-lock.yaml` を縮退再生成する
 ため、**必ず `--ignore-workspace` を付ける**こと。
+
+### デモ（m3-t1）
+
+`demo/crs-estimate-ranking.html` は、`Atlas`（投影）→ `Daedalus`（当てはめ）→ `Teiresias`
+（順位づけ）の推定パイプラインをブラウザで触れるデモである。`@c4h/atlas` の `dist` を解決する
+ため、**先に Atlas も build しておくこと**。
+
+```bash
+# 開発サーバ
+pnpm --ignore-workspace run dev
+
+# Pages 成果物のビルドと検証（GITHUB_PAGES=true で base が /Teiresias/ になる）
+pnpm --ignore-workspace run verify:demo
+pnpm --ignore-workspace run verify:demo-bundle
+
+# 手元のブラウザで確認する（base が "/" のビルドと対で使う）
+pnpm --ignore-workspace run build:demo
+pnpm --ignore-workspace run preview
+```
+
+proj-wasm は Worker と WASM を読むため、**`file://` では動かない**（HTTP で配信すること）。
 
 ## 関連文書
 
