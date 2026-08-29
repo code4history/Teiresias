@@ -1,0 +1,138 @@
+/*
+ * デモ固有の見た目（m3-t1 設計 v1.3 §5.3 / K17）。
+ *
+ * **C4H デモシェルのクラス（接頭辞 c4h）をここで定義しない。** シェルの規約は Atlas が
+ * 所有しており（`demo-shell.css` は逐語コピー）、Teiresias が勝手に拡張しない。デモ固有の
+ * ものは `.teiresias-*` 接頭辞に置く（Atlas が `.atlas-*` を使っている前例に踏襲）。
+ *
+ * 接頭辞つきの literal を本ファイルに書かないのは、m3-t1/AC-7 の「本ファイルに当該接頭辞が
+ * 0 件」という assert が**自分自身の注記を検出して常に RED になる**のを避けるためである。
+ */
+
+.teiresias-toggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.teiresias-board {
+  position: relative;
+  width: 380px;
+  height: 300px;
+}
+
+#geo-canvas,
+#pixel-canvas {
+  display: block;
+  width: 380px;
+  height: 300px;
+  background: #f8fafc;
+}
+
+#pixel-canvas {
+  cursor: grab;
+  touch-action: none;
+}
+
+#pixel-canvas:active {
+  cursor: grabbing;
+}
+
+.teiresias-badge-collapsed {
+  background: #fdecea;
+  color: #c0392b;
+}
+
+.teiresias-discrimination-text {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: #444;
+}
+
+.teiresias-results-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(360px, 1fr));
+  gap: 12px;
+  padding: 0 16px 12px;
+}
+
+.teiresias-card-header {
+  padding: 12px 16px 8px;
+  border-bottom: 1px solid #eef0f4;
+}
+
+.teiresias-card-header h2 {
+  font-size: 14px;
+  color: #1a2744;
+}
+
+.teiresias-card-header p {
+  font-size: 12px;
+  color: #777;
+  margin-top: 3px;
+}
+
+.teiresias-table-scroll {
+  max-height: 260px;
+  overflow: auto;
+}
+
+.teiresias-table-scroll table {
+  width: 100%;
+  border-collapse: collapse;
+  font-size: 12px;
+}
+
+.teiresias-table-scroll th,
+.teiresias-table-scroll td {
+  padding: 5px 10px;
+  text-align: left;
+  border-bottom: 1px solid #eef0f4;
+  white-space: nowrap;
+}
+
+.teiresias-table-scroll th {
+  position: sticky;
+  top: 0;
+  background: #f8f9fb;
+  color: #1a2744;
+  font-size: 11px;
+}
+
+.teiresias-truth-row {
+  background: #eef5ff;
+  font-weight: 600;
+}
+
+.teiresias-untransformable {
+  padding: 6px 16px 12px;
+  font-size: 12px;
+  color: #c0392b;
+}
+
+.teiresias-detail-body {
+  padding: 12px 16px;
+  font-size: 12px;
+}
+
+.teiresias-definition-list {
+  display: grid;
+  grid-template-columns: 110px 1fr;
+  gap: 4px 12px;
+}
+
+.teiresias-definition-list dt {
+  color: #1a2744;
+  font-weight: 600;
+}
+
+.teiresias-definition-list dd {
+  font-family: "SFMono-Regular", Consolas, monospace;
+  color: #444;
+  word-break: break-all;
+}
+
+@media (max-width: 820px) {
+  .teiresias-results-grid {
+    grid-template-columns: 1fr;
+  }
+}
