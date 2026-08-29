@@ -11,7 +11,10 @@
  *   （設計 K9。Atlas の `__ATLAS_…` と名前空間を分ける — 将来同一ページで両方を読み込んだ
  *   場合に衝突しないため）。
  * - `test` セクションは**置かない**（`vitest.config.ts` が既存 ∴ 二重定義を避ける）。
- * - COOP / COEP / `coi-serviceworker` は**入れない**（Atlas の規約を踏襲。緩めない）。
+ * - cross-origin isolation のヘッダ 2 種と、それを注入する service worker は**入れない**
+ *   （Atlas の規約を踏襲。緩めない）。禁止語の literal を本ファイルへ書かないのは、
+ *   `tests/publish-and-demo.test.ts` の否定 assert が**この注記自身を検出して常に RED に
+ *   なる**のを避けるためである（needle の正本は同テストの表側にある）。
  * - `data/crs/custom-projections.json` は複製しない（本デモは custom projection を使わない）。
  */
 import { defineConfig } from "vite";
