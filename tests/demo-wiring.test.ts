@@ -131,6 +131,30 @@ describe('m3-t1/AC-6: デモの DOM 結線（jsdom / stub engine 注入）', () 
     expect(document.getElementById('status')?.textContent).toContain('計算完了');
   });
 
+  /**
+   * 回帰テスト（m3-t1/AC-16 の実ブラウザ観測で発見した欠陥）。
+   *
+   * 実装は world file の 6 係数を ESRI の行名（A/D/B/E/C/F）で読み出していたが、
+   * `@c4h/daedalus` の `WorldFile` の実キーは
+   * `xScale` / `xSkew` / `xOrigin` / `ySkew` / `yScale` / `yOrigin` である
+   * （実測: `Daedalus/src/types.ts:3-10`）∴ 画面に `A=undefined D=undefined …` と出ていた。
+   * jsdom テストは当初「選択結果が描画されること」しか見ておらず、**値が undefined でも
+   * 通っていた** ∴ 値そのものを assert する検査を足す。
+   */
+  it('選択結果の world file が 6 係数とも実値で表示される（undefined を出さない）', async () => {
+    const engine = makeStubEngine();
+    const demo = initDemo({ engine });
+    await demo.whenSettled();
+
+    const selected = document.getElementById('selected-body') as HTMLElement;
+    const text = selected.textContent ?? '';
+    for (const key of ['xScale', 'xSkew', 'xOrigin', 'ySkew', 'yScale', 'yOrigin']) {
+      expect(text).toContain(key);
+    }
+    expect(text).not.toContain('undefined');
+    expect(text).toContain('EPSG:6674');
+  });
+
   it('(d) #ranked-body の行数が ranked.length と一致する', async () => {
     const engine = makeStubEngine();
     const demo = initDemo({ engine });

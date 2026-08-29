@@ -285,11 +285,11 @@ export function initDemo(config = {}) {
       appendDefinition(list, 'qualityGate', String(qualityGate));
       appendDefinition(list, 'score', score === null ? '—' : score.toFixed(6));
       appendDefinition(list, 'rmsMeters', formatMeters(rmsMeters));
-      appendDefinition(
-        list,
-        'worldFile',
-        `A=${worldFile.A} D=${worldFile.D} B=${worldFile.B} E=${worldFile.E} C=${worldFile.C} F=${worldFile.F}`,
-      );
+      // `@c4h/daedalus` の WorldFile の実キー（実測: Daedalus/src/types.ts:3-10）。
+      // world file の行順（xScale / ySkew / xSkew / yScale / xOrigin / yOrigin）で並べる。
+      for (const key of ['xScale', 'ySkew', 'xSkew', 'yScale', 'xOrigin', 'yOrigin']) {
+        appendDefinition(list, key, formatMeters(worldFile[key]));
+      }
     }
     appendDefinition(list, 'status', String(scene.status));
     el.selectedBody.appendChild(list);
