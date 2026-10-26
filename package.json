@@ -12,7 +12,7 @@
       "default": "./dist/index.js"
     }
   },
-  "description": "CRS and world-file estimator for Maplat V3.1.",
+  "description": "CRS and world-file estimator for Maplat.",
   "repository": {
     "type": "git",
     "url": "git+https://github.com/code4history/Teiresias.git"
