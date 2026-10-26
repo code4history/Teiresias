@@ -7,7 +7,7 @@
 - Input: GCPs plus candidate CRSs
 - Output: selected CRS plus world-file 6 parameters
 - Runtime: Node.js and browser (bundler = verified / real browser = observed once / continuous, automated browser execution is unverified. See "Known limitations" below)
-- Scope: orchestration over fitting, not DuckDB catalog lookup
+- Scope: orchestration over fitting; it does not perform catalog lookup (the caller supplies the candidates)
 
 日本語のREADMEは[こちら](./README.ja.md)。
 
@@ -42,9 +42,7 @@ are duplicated only the first occurrence is evaluated.
 
 ### The contract of `CandidateTransformer`
 
-The authoritative source of the contract is
-[`docs/superpowers/specs/2026-08-28-mock-transformer-contract.md`](../docs/superpowers/specs/2026-08-28-mock-transformer-contract.md)
-in the parent repository. Its key points are as follows.
+The transformer injected by the caller must satisfy the following contract.
 
 | # | contract |
 |---|---|
@@ -61,10 +59,10 @@ Both synchronous returns and `Promise` returns conform. Teiresias processes the 
 **sequentially in input order** and normalizes the returns with `await` (so that the order of
 failures / warnings and the order of adapter calls are deterministic).
 
-In Cycle 1, a successful transformer output is interpreted as projected `[E, N]` **in metres**.
+A successful transformer output is interpreted as projected `[E, N]` **in metres**.
 Teiresias always passes `{ kind: 'planar_xy', axisOrder: 'xy', unit: 'm' }` to Daedalus and does not
 forward the input-side `geoBasis` as-is. Handling of candidates whose native unit is not the metre does
-not exist in the Cycle 1 API.
+not exist in the current API.
 
 ## Ranking and score
 
@@ -86,8 +84,7 @@ not exist in the Cycle 1 API.
 | `selected.worldFile` / `selected.qualityGate` | **the final return of Daedalus for the same candidate** (which may include an adopted affine) |
 
 Therefore, when `selected.worldFile` is affine, `selected.rmsMeters` is not the residual of that
-worldFile. An API extension that exposes the final RMS under a different name has not been done in
-Cycle 1.
+worldFile. There is no API that exposes the final RMS under a different name.
 
 ## Status and diagnostics
 
@@ -121,38 +118,38 @@ decision to persist or adopt is the responsibility of the Editor, not of the lib
 
 ## Known limitations
 
-- **The three tiers of browser verification** (m3-t1 split the former "node-only" item. **Evidence is not
-  carried across the tiers** — not painting the runtime tier with the evidence of the bundler tier is a
-  discipline imposed by §11 of the provisional specification):
+- **Browser support, in three levels** (evidence for one level is not reused for another):
   - **bundler = verified**: `pnpm run verify:demo-bundle` (`scripts/verify-demo-browser-bundle.mjs`)
     scans the output chunks of the demo build and mechanically verifies that no Node-specific specifier
     remains and that Daedalus-derived code is actually present. It runs continuously from CI
     (`.github/workflows/{test,deploy}.yml`).
-  - **browser runtime = observed (not "verified")**: on 2026-08-29, `demo/crs-estimate-ranking.html` was
+  - **browser runtime = checked manually once**: on 2026-08-29, `demo/crs-estimate-ranking.html` was
     opened in a real browser and the initialization of proj-wasm, the candidate ranking, the loss of
     discriminating power caused by flipping the y axis, and the reordering caused by dragging a GCP were
-    observed (m3-t1/AC-16). **It is a single observation and not an automated check, so it does not guard
-    against regressions.**
-  - **Continuous, automated browser execution on CI and automated canvas drag operation = unverified**
-    (a known gap of Cycle 1; an automated end-to-end test was handed over to post-cycle).
-- **The real-engine E2E is connected**: `tests/estimate-crs.real-engine.e2e.test.ts` holds an E2E that
-  injects the real CRS engine (Atlas / proj-wasm) (m2a-t1). The mock E2E (`estimate-crs.e2e.test.ts`)
-  coexists with it as a deterministic verification of the contract. The former description
-  "**the real engine is not connected**: injecting the real CRS engine is a follow-up task" was a stale
-  description left behind after the m2a-t1 merge, and it was corrected in m3-t1.
+    observed. **It is a single manual check and not an automated test, so it does not guard against
+    regressions.**
+  - **Continuous, automated browser execution on CI and automated canvas drag operation = not available yet.**
+- **The real-engine E2E is connected**: `tests/estimate-crs.real-engine.e2e.test.ts` injects the real CRS
+  engine (Atlas / proj-wasm). The mock E2E (`estimate-crs.e2e.test.ts`) coexists with it as a
+  deterministic verification of the contract.
 - **`status: 'ok'` is unreachable from the current public API**: since `EstimateOptions` does not expose
   the `holdout` of Daedalus, a successful fit of the real Daedalus always has at least one warning. The
   branch is kept for `FitStatus` compatibility and for future holdout support, and it is covered by unit
   verification of the internal helper.
 - **Units**: the transformer output of a successful candidate is fixed to metres. Handling of feet /
   native units is not supported.
+- **Equivalent candidates**: a catalog can contain CRSs whose identifiers differ but whose projection
+  definition (PROJ string) is the same (for example `EPSG:2448`, `EPSG:6674` and `ESRI:112206`). They give
+  exactly the same estimate, so their order in `ranked` is decided by the identity order. There is no API
+  that returns such groups of equivalent candidates; compare the candidates' `proj4` to recognize them
+  (tracked in the [issue tracker](https://github.com/code4history/Teiresias/issues)).
 - **Not supported**: geodesic RMS through the inverse transformation, the antimeridian, polar regions,
   epoch / grid provenance, robust / weight / LOO / bootstrap, progress callbacks, parallel candidate
-  processing, and cancellation.
-- **Distribution**: this package remains `private: true`. The decision **not to publish in Cycle 1** is
-  recorded (for the reason and the handover to post-cycle, see the license / publish section of the
-  provisional specification). `@c4h/daedalus` is resolved through the local sibling `link:../Daedalus`.
-  Whether to switch to a semver dependency at publish time is undecided.
+  processing, and cancellation. Cancellation is planned for the first npm release; the others are
+  tracked in the [issue tracker](https://github.com/code4history/Teiresias/issues).
+- **No CLI**: Teiresias is a library only. There is no command-line interface.
+- **Distribution**: this package is not published to npm yet (`private: true`). `@c4h/daedalus` is
+  resolved through the local sibling `link:../Daedalus`.
 
 ## Development
 
@@ -169,7 +166,7 @@ Because `@c4h/daedalus` resolves `dist` through its exports, build Daedalus firs
 parent repository, a bare `pnpm run <script>` regenerates the parent `pnpm-lock.yaml` in a degenerate
 form, so **always add `--ignore-workspace`**.
 
-### Demo (m3-t1)
+### Demo
 
 `demo/crs-estimate-ranking.html` is a demo that lets you touch the estimation pipeline
 `Atlas` (projection) → `Daedalus` (fitting) → `Teiresias` (ranking) in a browser. Because it resolves
@@ -189,18 +186,6 @@ pnpm --ignore-workspace run preview
 ```
 
 Because proj-wasm loads a Worker and a WASM binary, **it does not work over `file://`** (serve it over HTTP).
-
-## Related documents
-
-- [Provisional specification of the CRS estimation libraries](../docs/superpowers/specs/2026-08-27-c1-crs-libs-provisional-spec.md) —
-  the observation contract, the ranking, the persistence boundary and the verification scope of this
-  package are collected there (it is a **provisional specification**, not a finalized specification
-  approved by a human).
-- [Mock transformer contract](../docs/superpowers/specs/2026-08-28-mock-transformer-contract.md) —
-  the authoritative source of the `CandidateTransformer` contract.
-
-The links above **resolve only when the parent repository (the monorepo) is checked out**.
-When this repository is cloned on its own, `../docs/` does not exist.
 
 ## License
 

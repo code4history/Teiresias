@@ -7,7 +7,7 @@
 - Input: GCPs plus candidate CRSs
 - Output: selected CRS plus world-file 6 parameters
 - Runtime: Node.js と browser（bundler = 検証済 ／ 実ブラウザ = 1 回観測済 ／ 継続的・自動のブラウザ実行は未検証。下記「既知の制限」）
-- Scope: orchestration over fitting, not DuckDB catalog lookup
+- Scope: 当てはめの統括。カタログ検索は行わない（候補は呼出側が渡す）
 
 English README is [here](./README.md).
 
@@ -41,9 +41,7 @@ const result: EstimationResult = await estimateCrs(gcps, candidates, {
 
 ### `CandidateTransformer` の契約
 
-契約の正本は親リポジトリの
-[`docs/superpowers/specs/2026-08-28-mock-transformer-contract.md`](../docs/superpowers/specs/2026-08-28-mock-transformer-contract.md)
-である。要点は次のとおり。
+呼出側が注入する transformer は次の契約を満たすこと。
 
 | # | 契約 |
 |---|---|
@@ -59,9 +57,9 @@ const result: EstimationResult = await estimateCrs(gcps, candidates, {
 同期返却と `Promise` 返却の双方が適合する。Teiresias は候補を**入力順に逐次**処理し、
 返却を `await` で正規化する（failure / warning の順序と adapter 呼出し順を決定的にするため）。
 
-Cycle 1 では、transformer の成功出力を **metre の projected `[E, N]`** と解釈する。Teiresias は
+transformer の成功出力を **metre の projected `[E, N]`** と解釈する。Teiresias は
 Daedalus へ常に `{ kind: 'planar_xy', axisOrder: 'xy', unit: 'm' }` を渡し、入力側 `geoBasis` を
-そのまま横流ししない。native 単位が metre でない候補の扱いは Cycle 1 の API に存在しない。
+そのまま横流ししない。native 単位が metre でない候補の扱いは現在の API に存在しない。
 
 ## ranking と score
 
@@ -81,7 +79,7 @@ Daedalus へ常に `{ kind: 'planar_xy', axisOrder: 'xy', unit: 'm' }` を渡し
 | `selected.worldFile` / `selected.qualityGate` | **同じ候補に対する Daedalus の最終返却**（affine 採用を含み得る） |
 
 ∴ `selected.worldFile` が affine のとき、`selected.rmsMeters` はその worldFile の残差ではない。
-final RMS を別名で公開する API 拡張は Cycle 1 では行っていない。
+final RMS を別名で公開する API は無い。
 
 ## status と診断
 
@@ -112,30 +110,31 @@ final RMS を別名で公開する API 拡張は Cycle 1 では行っていな�
 
 ## 既知の制限
 
-- **browser 検証の 3 段**（m3-t1 で旧「node-only」項を分割した。**行をまたいで実績を流用しない** —
-  bundler の実績で runtime 行を塗らないことは仮仕様正本 §11 が課した規律である）:
-  - **bundler = 検証済**: `pnpm run verify:demo-bundle`（`scripts/verify-demo-browser-bundle.mjs`）が
+- **ブラウザ対応の 3 段**（ある段の実績を別の段へ流用しない）:
+  - **bundler = 検証済み**: `pnpm run verify:demo-bundle`（`scripts/verify-demo-browser-bundle.mjs`）が
     demo build の出力チャンクを走査し、Node 固有指定子が残っていないことと Daedalus 由来コードが
     実在することを機械検証する。CI（`.github/workflows/{test,deploy}.yml`）から継続的に走る。
-  - **browser runtime = 観測済（「検証済」ではない）**: 2026-08-29 に `demo/crs-estimate-ranking.html`
+  - **browser runtime = 手動で 1 回確認済み**: 2026-08-29 に `demo/crs-estimate-ranking.html`
     を実ブラウザで開き、proj-wasm の初期化・候補順位・y 軸反転による識別力の消滅・GCP ドラッグによる
-    順位入替を観測した（m3-t1/AC-16）。**1 回の観測であって自動検査ではない ∴ 回帰を守らない。**
-  - **CI 上での継続的・自動のブラウザ実行と canvas ドラッグの自動操作 = 未検証**（Cycle 1 の既知欠落。
-    自動化された貫通 E2E は post-cycle へ申し送った）。
-- **実 engine E2E は接続済み**: `tests/estimate-crs.real-engine.e2e.test.ts` が実 CRS engine
-  （Atlas / proj-wasm）を注入した E2E を持つ（m2a-t1）。mock E2E（`estimate-crs.e2e.test.ts`）は
-  契約の決定的な検証として併存する。⚠️ 旧記述「**実 engine 未接続**: 実 CRS engine の注入は後続タスク」は
-  m2a-t1 マージ後に取り残された stale 記述であり、m3-t1 で是正した。
+    順位入替を確かめた。**1 回の手動確認であって自動テストではない ∴ 回帰は防げない。**
+  - **CI 上での継続的・自動のブラウザ実行と canvas ドラッグの自動操作 = 未対応。**
+- **実 engine の E2E は接続済み**: `tests/estimate-crs.real-engine.e2e.test.ts` が実 CRS engine
+  （Atlas / proj-wasm）を注入した E2E を持つ。mock E2E（`estimate-crs.e2e.test.ts`）は
+  契約の決定的な検証として併存する。
 - **`status: 'ok'` は現行公開 API から到達不能**: `EstimateOptions` は Daedalus の `holdout` を
   公開しないため、実 Daedalus の成功 fit は必ず warning を 1 件以上持つ。分岐は `FitStatus` 互換と
   将来の holdout 対応のために保持し、内部 helper の単体検証で担保している。
 - **単位**: 成功候補の transformer 出力は metre 固定。foot / native unit の扱いは未対応である。
+- **同値な候補**: カタログには、識別子は違うが投影の定義（PROJ 文字列）が同じ CRS が含まれうる
+  （例: `EPSG:2448`・`EPSG:6674`・`ESRI:112206`）。これらは推定でまったく同じ値になるため、`ranked` の
+  中の並びは identity の順で決まる。同値な候補の群を返す API は無い。候補の `proj4` を比べれば
+  見分けられる（[Issue の一覧](https://github.com/code4history/Teiresias/issues)で扱う）。
 - **未対応**: inverse 変換による geodesic RMS、アンチメリディアン、極域、epoch / grid provenance、
-  robust / weight / LOO / bootstrap、進捗 callback、並列候補処理、キャンセル。
-- **配布**: 本 package は `private: true` のままである。**Cycle 1 では publish しない**という判断を
-  記録した（理由と post-cycle への申し送りは仮仕様正本の license / publish 節を参照）。
-  `@c4h/daedalus` はローカル sibling の `link:../Daedalus` で解決している。publish 時に
-  semver 依存へ切り替えるかどうかは未決である。
+  robust / weight / LOO / bootstrap、進捗 callback、並列候補処理、キャンセル。キャンセルは npm の
+  初版で対応する予定。それ以外は [Issue の一覧](https://github.com/code4history/Teiresias/issues)で扱う。
+- **CLI は無い**: Teiresias はライブラリだけを提供する。コマンドラインの道具は無い。
+- **配布**: 本 package はまだ npm に公開していない（`private: true`）。`@c4h/daedalus` は
+  ローカル sibling の `link:../Daedalus` で解決している。
 
 ## 開発
 
@@ -152,7 +151,7 @@ pnpm --ignore-workspace run coverage
 親リポジトリの worktree では、素の `pnpm run <script>` が親の `pnpm-lock.yaml` を縮退再生成する
 ため、**必ず `--ignore-workspace` を付ける**こと。
 
-### デモ（m3-t1）
+### デモ
 
 `demo/crs-estimate-ranking.html` は、`Atlas`（投影）→ `Daedalus`（当てはめ）→ `Teiresias`
 （順位づけ）の推定パイプラインをブラウザで触れるデモである。`@c4h/atlas` の `dist` を解決する
@@ -172,17 +171,6 @@ pnpm --ignore-workspace run preview
 ```
 
 proj-wasm は Worker と WASM を読むため、**`file://` では動かない**（HTTP で配信すること）。
-
-## 関連文書
-
-- [CRS 推定ライブラリ群 仮仕様正本](../docs/superpowers/specs/2026-08-27-c1-crs-libs-provisional-spec.md) —
-  本 package の観測契約・ranking・保存境界・検証範囲が集約されている（**仮仕様**であり
-  人間承認済みの確定仕様ではない）。
-- [mock transformer 契約文書](../docs/superpowers/specs/2026-08-28-mock-transformer-contract.md) —
-  `CandidateTransformer` 契約の正本。
-
-上記リンクは**親リポジトリ（monorepo）を checkout したときにのみ解決する**。
-本 repository を単体で clone した場合、`../docs/` は存在しない。
 
 ## ライセンス
 

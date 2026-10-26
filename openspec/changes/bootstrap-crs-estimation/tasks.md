@@ -13,5 +13,8 @@
 >   `warnings` は Daedalus の凍結 `FitWarning` のみ、`untransformableIds` は transformer /
 >   candidate 入力層の失敗のみを収容する。値の意味と保存境界は `README.md` を参照。
 >
-> 未対応（Cycle 1 の非目標）: 実 CRS engine の注入、browser runtime、foot / native unit 出力、
+> 未対応（Cycle 1 の非目標）: foot / native unit 出力、
 > inverse geodesic RMS、robust / weight / LOO / bootstrap、進捗 callback、並列化、キャンセル。
+> 実 CRS engine の注入（`tests/estimate-crs.real-engine.e2e.test.ts`）と browser runtime（デモの bundle 検査
+> `scripts/verify-demo-browser-bundle.mjs`）は対応済み。foot / native unit 出力とキャンセルは npm の初版で対応する予定。
+> それ以外は https://github.com/code4history/Teiresias/issues で扱う。
