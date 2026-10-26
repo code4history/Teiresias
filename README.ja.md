@@ -128,10 +128,10 @@ final RMS を別名で公開する API は無い。
 - **同値な候補**: カタログには、識別子は違うが投影の定義（PROJ 文字列）が同じ CRS が含まれうる
   （例: `EPSG:2448`・`EPSG:6674`・`ESRI:112206`）。これらは推定でまったく同じ値になるため、`ranked` の
   中の並びは identity の順で決まる。同値な候補の群を返す API は無い。候補の `proj4` を比べれば
-  見分けられる（[Issue の一覧](https://github.com/code4history/Teiresias/issues)で扱う）。
+  見分けられる（[#4](https://github.com/code4history/Teiresias/issues/4) で扱う）。
 - **未対応**: inverse 変換による geodesic RMS、アンチメリディアン、極域、epoch / grid provenance、
   robust / weight / LOO / bootstrap、進捗 callback、並列候補処理、キャンセル。キャンセルは npm の
-  初版で対応する予定。それ以外は [Issue の一覧](https://github.com/code4history/Teiresias/issues)で扱う。
+  初版で対応する予定。それ以外は [#5](https://github.com/code4history/Teiresias/issues/5) で扱う。
 - **CLI は無い**: Teiresias はライブラリだけを提供する。コマンドラインの道具は無い。
 - **配布**: 本 package はまだ npm に公開していない（`private: true`）。`@c4h/daedalus` は
   ローカル sibling の `link:../Daedalus` で解決している。

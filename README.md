@@ -142,11 +142,11 @@ decision to persist or adopt is the responsibility of the Editor, not of the lib
   definition (PROJ string) is the same (for example `EPSG:2448`, `EPSG:6674` and `ESRI:112206`). They give
   exactly the same estimate, so their order in `ranked` is decided by the identity order. There is no API
   that returns such groups of equivalent candidates; compare the candidates' `proj4` to recognize them
-  (tracked in the [issue tracker](https://github.com/code4history/Teiresias/issues)).
+  (tracked in [#4](https://github.com/code4history/Teiresias/issues/4)).
 - **Not supported**: geodesic RMS through the inverse transformation, the antimeridian, polar regions,
   epoch / grid provenance, robust / weight / LOO / bootstrap, progress callbacks, parallel candidate
   processing, and cancellation. Cancellation is planned for the first npm release; the others are
-  tracked in the [issue tracker](https://github.com/code4history/Teiresias/issues).
+  tracked in [#5](https://github.com/code4history/Teiresias/issues/5).
 - **No CLI**: Teiresias is a library only. There is no command-line interface.
 - **Distribution**: this package is not published to npm yet (`private: true`). `@c4h/daedalus` is
   resolved through the local sibling `link:../Daedalus`.

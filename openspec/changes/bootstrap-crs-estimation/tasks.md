@@ -17,4 +17,4 @@
 > inverse geodesic RMS、robust / weight / LOO / bootstrap、進捗 callback、並列化、キャンセル。
 > 実 CRS engine の注入（`tests/estimate-crs.real-engine.e2e.test.ts`）と browser runtime（デモの bundle 検査
 > `scripts/verify-demo-browser-bundle.mjs`）は対応済み。foot / native unit 出力とキャンセルは npm の初版で対応する予定。
-> それ以外は https://github.com/code4history/Teiresias/issues で扱う。
+> それ以外は https://github.com/code4history/Teiresias/issues/5 で扱う。
