@@ -5,7 +5,7 @@
  * - (a) 反射なしで真値 `EPSG:6674` が `ranked[0]`
  * - (b) 反射なしの `rms[2位]/rms[1位]` が `1e6` を超える
  * - (c) 反射ありで同比が `1.01` 未満に落ちる（= 識別力が潰れる）
- * - (d) 既定カタログ + 反射ありで真値が `ranked[0]` から外れる
+ * - (d) 既定カタログ + 反射ありで真値が先頭 3 件から外れる（真値の縮退クラスが先頭を占めない）
  *
  * (c)(d) はデモの「反射を吸収する」を外した側（`chirality: 'direct-only'`）の固定である。
  * 正規化あり（既定）の側は (c')(d') が固定する — 反射の有無によらず真値の縮退クラスが上位を
@@ -60,6 +60,19 @@ function contextFor(mode: 'zones' | 'catalog') {
   return cache.get(mode)!;
 }
 
+/** 候補のうち `proj4` が真値と一致するもの（真値の縮退クラス）の id。大きさは実行時に決まる。 */
+async function truthClassIds(mode: 'zones' | 'catalog'): Promise<string[]> {
+  const { candidates } = await contextFor(mode);
+  const rows = candidates as Array<{ id: string; proj4: string }>;
+  const truth = rows.find((row) => row.id === TRUE_ID);
+  if (truth === undefined) throw new Error(`候補に ${TRUE_ID} が無い`);
+  return rows.filter((row) => row.proj4 === truth.proj4).map((row) => row.id).sort();
+}
+
+function headIds(ranked: ReadonlyArray<{ id: string }>, k: number): string[] {
+  return ranked.slice(0, k).map((entry) => entry.id).sort();
+}
+
 async function scene({ mode, yFlip, chirality, mutate }: SceneInput) {
   const { candidates, basePixels } = await contextFor(mode);
   const pixels = basePixels.map((point) => [point[0], point[1]] as [number, number]);
@@ -99,15 +112,20 @@ describe('m3-t1/AC-5: デモの現象を実 Atlas engine で固定する', () =>
     expect(collapsed).toBe(true);
   }, 30_000);
 
-  it('(d) 正規化なし（direct-only）: 既定カタログ + 反射ありでは真値が ranked[0] から外れる', async () => {
+  it('(d) 正規化なし（direct-only）: 既定カタログ + 反射ありでは真値が先頭 3 件から外れる', async () => {
     const reflected = await scene({ mode: 'catalog', yFlip: true, chirality: 'direct-only' });
     const forward = await scene({ mode: 'catalog', yFlip: false, chirality: 'direct-only' });
+    const klass = await truthClassIds('catalog');
+    expect(klass).toContain(TRUE_ID);
 
-    expect(reflected.ranked.length).toBeGreaterThan(3);
-    expect(reflected.ranked[0].id).not.toBe(TRUE_ID);
+    // 縮退クラスの先頭は identity 順で決まるため、ranked[0] が真値でないことは何も区別しない。
+    // 区別するのは「真値が先頭 k 件に入るか」である。
+    expect(reflected.ranked.length).toBeGreaterThan(klass.length);
+    expect(reflected.ranked.slice(0, klass.length).some((entry) => entry.isTruth)).toBe(false);
+    expect(headIds(reflected.ranked, klass.length)).not.toEqual(klass);
     expect(reflected.ranked.some((entry) => entry.isTruth)).toBe(true);
-    // 反射なしでは真値が縮退クラスごと先頭 3 件に入る（対照）
-    expect(forward.ranked.slice(0, 3).some((entry) => entry.isTruth)).toBe(true);
+    // 反射なしでは真値の縮退クラスが先頭 k 件を占める（対照）
+    expect(headIds(forward.ranked, klass.length)).toEqual(klass);
   }, 30_000);
 
   it("(c') 正規化あり（既定）: 反射ありでも真値が ranked[0] で識別できていて、yScale が負", async () => {
@@ -120,8 +138,11 @@ describe('m3-t1/AC-5: デモの現象を実 Atlas engine で固定する', () =>
   it("(d') 正規化あり（既定）: 既定カタログで y の向きによらず真値が先頭 3 件に入り、yScale の符号だけが分かれる", async () => {
     const reflected = await scene({ mode: 'catalog', yFlip: true });
     const forward = await scene({ mode: 'catalog', yFlip: false });
+    const klass = await truthClassIds('catalog');
     expect(reflected.ranked.map((entry) => entry.id)).toEqual(forward.ranked.map((entry) => entry.id));
-    expect(reflected.ranked.slice(0, 3).some((entry) => entry.isTruth)).toBe(true);
+    // (d) との対比: 反射ありでも真値の縮退クラスが先頭 k 件を占め、真値を含む
+    expect(headIds(reflected.ranked, klass.length)).toEqual(klass);
+    expect(reflected.ranked.slice(0, klass.length).some((entry) => entry.isTruth)).toBe(true);
     expect(forward.selected?.worldFile.yScale as number).toBeGreaterThan(0);
     expect(reflected.selected?.worldFile.yScale as number).toBeLessThan(0);
   }, 30_000);
