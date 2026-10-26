@@ -320,9 +320,9 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
 });
 
 describe('AC-T1 (b): fixture コピーの SHA-256 三者一致', () => {
-  /** 契約文書 §5.3 が定める fixture の実測 SHA-256（fixtureVersion 1.0.0）。 */
+  /** 契約文書が定める fixture の実測 SHA-256（fixtureVersion 1.0.1）。 */
   const SPECIFIED_SHA256 =
-    'f95c73f10700e4bd7bdb681ebc8f6c3c9abd4104390b9b608b3303b56fec2df4';
+    '5da3d253e46a0dc6f8710432fc0783a261fbb35ca0c47757b0b204a48fa85495';
   const copySource = join(daedalusRoot, 'src', `${'testkit'}`, 'mockContractFixture.ts');
   const copyTarget = join(packageRoot, 'tests', 'fixtures', 'mockContractFixture.ts');
 
