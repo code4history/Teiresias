@@ -17,7 +17,7 @@
  */
 
 /** fixture の版。改訂時に上げる（契約文書に記載された版と一致すること）。 */
-export const fixtureVersion = '1.0.0';
+export const fixtureVersion = '1.0.1';
 
 /** mock が対応する唯一の geoBasis（lonlat_deg / lon-lat 順）。 */
 export const geoBasisLonLat = { kind: 'lonlat_deg', axisOrder: 'lon-lat' } as const;
@@ -125,12 +125,15 @@ export const unknownId = 'MOCK:NO-SUCH';
 // ---------------------------------------------------------------------------
 
 /**
- * 5 点・similarity 厳密適合・yScale<0 を含む。
+ * 5 点。v 反転（反射）を含む。
  *   pixel (u,v) -> lon = 135 + u*0.0078125, lat = 35 - v*0.0078125
- * 期待 WorldFile:
+ * pixel y 下正・target 北上正なので、写像は向きを反転する（反射。行列式が負）。
+ * 呼出側が chirality 正規化（pixel の v を反転した入力も当てて良い方を採る）を介すと、
+ * similarity で厳密に適合し、次の WorldFile になる:
  *   xScale=869.6875, xSkew=0, xOrigin=0, ySkew=0, yScale=-869.6875, yOrigin=0
- *   （E = 111320 * u * 0.0078125 = 869.6875u、N = -869.6875v。pixel y 下正・target 北上正から
- *     yScale < 0 になる — 符号を反転して正規化しない）
+ *   （E = 111320 * u * 0.0078125 = 869.6875u、N = -869.6875v）
+ * Daedalus 単体の `fitWorldFile` は向きを保つ similarity しか持たないため、この入力には
+ * similarity で厳密適合できず、affine 採用として 6 値（上と同じ値）が返る。
  * geo bbox の辺長 ≈ 8.7 km（緯度辺。対角は約 11〜12 km）であり L_geo gate 100 m を大きく超える。
  *
  * 本データは m1-t1 への **推奨**であり、m1-t1 のテスト設計を拘束しない。

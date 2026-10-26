@@ -382,7 +382,7 @@ describe('m2a-t1/AC-6: 実 engine を注入した estimateCrs（反射なしセ�
 // AC-7: 反射を含む実 GCP セットでの候補間相対順位（実測固定。K22）
 // ---------------------------------------------------------------------------
 
-describe('m2a-t1/AC-7: 実測固定 — 反射が候補弁別に与える影響（期待仕様の表明ではない）', () => {
+describe('AC-7: 実測固定・正規化なし（direct-only） — 反射が候補弁別に与える影響（期待仕様の表明ではない）', () => {
   /**
    * tolerance は**行ごとに違う**。設計 §3.5.4 の摂動感度表の当該行を転記する。
    * 一律の `1e-6` 相対ではない。表に無い値はテストへ焼かない（空欄＝未判定）。
@@ -475,6 +475,7 @@ describe('m2a-t1/AC-7: 実測固定 — 反射が候補弁別に与える影響�
     const sets = await gcpSets();
     return estimateCrs(reflectedSet ? sets.reflected : sets.forward, candidates, {
       transformer: makeTransformer(candidates),
+      chirality: 'direct-only',
     });
   }
 
@@ -544,8 +545,8 @@ describe('m2a-t1/AC-7: 実測固定 — 反射が候補弁別に与える影響�
     const sets = await gcpSets();
     const transformer = makeTransformer(candidates);
 
-    const reflectedResult = await estimateCrs(sets.reflected, candidates, { transformer });
-    const forwardResult = await estimateCrs(sets.forward, candidates, { transformer });
+    const reflectedResult = await estimateCrs(sets.reflected, candidates, { transformer, chirality: 'direct-only' });
+    const forwardResult = await estimateCrs(sets.forward, candidates, { transformer, chirality: 'direct-only' });
 
     expect(reflectedResult.untransformableIds).toEqual([]);
     const reflectedIds = rankedIds(reflectedResult);
@@ -580,7 +581,7 @@ describe('m2a-t1/AC-7: 実測固定 — 反射が候補弁別に与える影響�
 // AC-13: 反射判定の実 engine 成立性（実測固定。人間追加入力への回答）
 // ---------------------------------------------------------------------------
 
-describe('m2a-t1/AC-13: 実測固定 — 符号付き面積・部分集合多数決による反射判定', () => {
+describe('AC-13: 実測固定・正規化なし（direct-only） — 符号付き面積・部分集合多数決による反射判定', () => {
   /**
    * 判定結果は診断値であり、ranking にも AC-6 にも影響させない（設計 §5.6.1 / K13）。
    * 反射時の挙動を決めるのは m2b である。
@@ -639,8 +640,8 @@ describe('m2a-t1/AC-13: 実測固定 — 符号付き面積・部分集合多数
     const sets = await gcpSets();
     const transformer = makeTransformer(candidates);
 
-    const forwardResult = await estimateCrs(sets.forward, candidates, { transformer });
-    const reflectedResult = await estimateCrs(sets.reflected, candidates, { transformer });
+    const forwardResult = await estimateCrs(sets.forward, candidates, { transformer, chirality: 'direct-only' });
+    const reflectedResult = await estimateCrs(sets.reflected, candidates, { transformer, chirality: 'direct-only' });
 
     const reflectedReports = await reportsFor(true);
     expect((reflectedReports.get(TRUE_ID) as ReflectionReport).verdict).toBe('reflected');
@@ -653,7 +654,7 @@ describe('m2a-t1/AC-13: 実測固定 — 符号付き面積・部分集合多数
     const candidates = pickById(await catalogWide(), REQUIRED_IDS);
     const sets = await gcpSets();
     const transformer = makeTransformer(candidates);
-    const result = await estimateCrs(sets.reflected, candidates, { transformer });
+    const result = await estimateCrs(sets.reflected, candidates, { transformer, chirality: 'direct-only' });
     expect(result.ranked).toHaveLength(3);
     expect(result.untransformableIds).toEqual([]);
   });
@@ -725,5 +726,52 @@ describe('m2a-t1/AC-14: 実測固定 — PROJ-5 文字列が同一へ潰れる a
       DIFF_TO_30166_METERS,
       DEGENERATE_DIFF_RELATIVE_TOLERANCE,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// chirality 正規化（既定）: 既定カタログで反射の有無によらず真値の縮退クラスが先頭を占める
+// ---------------------------------------------------------------------------
+
+describe('chirality 正規化（既定）: 実 engine・既定カタログ', () => {
+  /** 候補のうち `proj4` が真値と一致するもの（真値の縮退クラス）。大きさは実行時に決まる。 */
+  async function truthClass(rows: readonly ProjectedCrsInfo[]): Promise<string[]> {
+    const [truth] = pickById(rows, [TRUE_ID]);
+    return rows.filter((row) => row.proj4 === truth.proj4).map((row) => row.id).sort();
+  }
+
+  async function run(reflectedSet: boolean): Promise<{ result: EstimationResult; klass: string[] }> {
+    const candidates = await catalogDefault();
+    const sets = await gcpSets();
+    const result = await estimateCrs(reflectedSet ? sets.reflected : sets.forward, candidates, {
+      transformer: makeTransformer(candidates),
+    });
+    return { result, klass: await truthClass(candidates) };
+  }
+
+  it('反射なし: 真値の縮退クラスが ranked[0..k-1] と集合として一致し、EPSG:6674 を含む', async () => {
+    const { result, klass } = await run(false);
+    expect(klass).toContain(TRUE_ID);
+    expect(rankedIds(result).slice(0, klass.length).sort()).toEqual(klass);
+    expect(result.selected?.worldFile.yScale as number).toBeGreaterThan(0);
+  });
+
+  it('反射あり: 真値の縮退クラスが ranked[0..k-1] と集合として一致し、EPSG:6674 を含み、yScale が負', async () => {
+    const { result, klass } = await run(true);
+    expect(result.untransformableIds).toEqual([]);
+    expect(klass).toContain(TRUE_ID);
+    expect(rankedIds(result).slice(0, klass.length).sort()).toEqual(klass);
+    expect(result.selected?.worldFile.yScale as number).toBeLessThan(0);
+  });
+
+  it('反射ありの ranked の rmsMeters は反射なしの値と相対 1e-9 以内で一致する', async () => {
+    const forward = await run(false);
+    const reflected = await run(true);
+    expect(rankedIds(reflected.result)).toEqual(rankedIds(forward.result));
+    for (const entry of forward.result.ranked) {
+      const id = `${entry.authority}:${entry.code}`;
+      const a = rmsOf(reflected.result, id);
+      expect(Math.abs(a - entry.rmsMeters)).toBeLessThanOrEqual(1e-9 * Math.max(1, entry.rmsMeters));
+    }
   });
 });

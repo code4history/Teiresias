@@ -172,6 +172,15 @@ function formatRatio(ratio) {
   return ratio.toFixed(6);
 }
 
+/**
+ * `#chirality`（反射を吸収する）の状態を `estimateCrs` の `chirality` へ写す。
+ * チェックボックスが無いページでは既定（正規化あり）にする。
+ */
+function chiralityFromCheckbox(checkbox) {
+  if (!checkbox) return 'normalize';
+  return checkbox.checked ? 'normalize' : 'direct-only';
+}
+
 // ---------------------------------------------------------------------------
 // 本体
 // ---------------------------------------------------------------------------
@@ -194,6 +203,7 @@ export function initDemo(config = {}) {
     note: doc.getElementById('note'),
     error: doc.getElementById('error'),
     yFlip: doc.getElementById('y-flip'),
+    chirality: doc.getElementById('chirality'),
     candidateMode: doc.getElementById('candidate-mode'),
     resetGcp: doc.getElementById('reset-gcp'),
     geoCanvas: doc.getElementById('geo-canvas'),
@@ -215,6 +225,7 @@ export function initDemo(config = {}) {
     basePixels: [],
     pixels: [],
     yFlip: false,
+    chirality: 'normalize',
     candidateMode: 'zones',
     candidates: [],
     transformer: null,
@@ -354,6 +365,7 @@ export function initDemo(config = {}) {
         pixels: state.pixels,
         geoPoints: state.geoPoints,
         yFlip: state.yFlip,
+        chirality: state.chirality,
         candidates: state.candidates,
         transformer: state.transformer,
       });
@@ -465,6 +477,11 @@ export function initDemo(config = {}) {
       void schedule();
     });
 
+    el.chirality?.addEventListener('change', () => {
+      state.chirality = chiralityFromCheckbox(el.chirality);
+      void schedule();
+    });
+
     el.candidateMode?.addEventListener('change', () => {
       state.candidateMode = el.candidateMode.value;
       void scheduleCandidateReload();
@@ -490,6 +507,7 @@ export function initDemo(config = {}) {
       await engine.loadEngine();
       state.candidateMode = el.candidateMode?.value ?? state.candidateMode;
       state.yFlip = Boolean(el.yFlip?.checked);
+      state.chirality = chiralityFromCheckbox(el.chirality);
       state.candidates = await engine.loadCandidates(state.candidateMode);
       state.transformer = engine.makeTransformer(state.candidates);
       const projected = await engine.projectTruth(state.candidates);
@@ -512,6 +530,7 @@ export function initDemo(config = {}) {
     getRecalcCount: () => state.recalcCount,
     getState: () => ({
       yFlip: state.yFlip,
+      chirality: state.chirality,
       candidateMode: state.candidateMode,
       pixels: state.pixels.map((point) => [point[0], point[1]]),
       basePixels: state.basePixels.map((point) => [point[0], point[1]]),

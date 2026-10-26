@@ -27,6 +27,7 @@ const result: EstimationResult = await estimateCrs(gcps, candidates, {
   topK,                        // defaults to all usable candidates
   normalizeEpsilonMeters,      // defaults to 100 (m)
   datumFamilyPrior,            // defaults to neutral (no prior)
+  chirality,                   // defaults to 'normalize'. 'direct-only' does not absorb a reflection
 });
 ```
 
@@ -75,6 +76,24 @@ not exist in the current API.
 - The order given in `datumFamilyPrior` only takes effect on ties (within machine precision). The prior
   never inverts a clear difference in fit. Finally the ordering closes deterministically by the code-unit
   order of the identity.
+
+### Reflection of the pixel y axis (`chirality`)
+
+Scanned images usually have their pixel y axis pointing down while the projected northing points up, so
+the pixel-to-ground mapping contains a reflection. A similarity transform (rotation, isotropic scale and
+translation) cannot represent a reflection, so without any countermeasure every candidate fits equally
+badly and the ranking loses its power to tell the candidates apart.
+
+With `chirality: 'normalize'` (the default), Teiresias keeps the similarity model unchanged and, for each
+candidate, also fits the same points with the pixel v coordinate negated, then keeps the side with the
+smaller basic sum of squared residuals (the non-flipped side wins a tie within machine precision). When
+the flipped side is kept, the signs of `xSkew` and `yScale` of the returned `worldFile` are inverted so
+that it maps the original pixel coordinates; `rmsMeters`, `qualityGate`, `warnings` and `status` are
+those of the kept side, and warnings of the other side are not reported. The transformer is called once
+per candidate either way. Whether a reflection was absorbed can be read from the sign of the determinant
+of `selected.worldFile` (`xScale * yScale - xSkew * ySkew < 0`).
+
+`chirality: 'direct-only'` skips the flipped fit and gives the behaviour without normalization.
 
 ### The difference in the meaning of `rmsMeters` (important)
 
@@ -126,7 +145,8 @@ decision to persist or adopt is the responsibility of the Editor, not of the lib
   - **browser runtime = checked manually once**: on 2026-08-29, `demo/crs-estimate-ranking.html` was
     opened in a real browser and the initialization of proj-wasm, the candidate ranking, the loss of
     discriminating power caused by flipping the y axis, and the reordering caused by dragging a GCP were
-    observed. **It is a single manual check and not an automated test, so it does not guard against
+    observed. That check predates the reflection handling (`chirality`); with the current default the
+    y-axis flip no longer collapses the ranking unless normalization is switched off in the demo. **It is a single manual check and not an automated test, so it does not guard against
     regressions.**
   - **Continuous, automated browser execution on CI and automated canvas drag operation = not available yet.**
 - **The real-engine E2E is connected**: `tests/estimate-crs.real-engine.e2e.test.ts` injects the real CRS

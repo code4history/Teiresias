@@ -61,6 +61,15 @@ export interface EstimateOptions {
   topK?: number;
   normalizeEpsilonMeters?: number;
   datumFamilyPrior?: readonly string[];
+  /**
+   * 反射（pixel の y 軸の向き）を吸収するか。既定 `'normalize'`。
+   *
+   * `'normalize'` は候補ごとに、pixel の v を反転した入力でも相似変換を当て、basic SSE の
+   * 小さい側を採る（同値なら反転しない側）。反転した側を採ったら、返す `worldFile` の
+   * `xSkew` と `yScale` の符号を反転して元の pixel 座標系の写像に戻す。transformer の
+   * 呼び出し回数は変わらない。`'direct-only'` は反転を試さない（正規化前の挙動）。
+   */
+  chirality?: 'normalize' | 'direct-only';
 }
 
 /**

@@ -8,6 +8,8 @@
  * - (c) `#reset-gcp` の `click` で pixel が初期値へ戻る
  * - (d) `#ranked-body` の行数が `ranked.length` と一致する
  * - (e) `discrimination.collapsed` が真のとき「識別力が潰れている」バッジが出る
+ *   （正規化 off で y 反転したとき。正規化 on〔既定〕では y 反転しても潰れない — (e')）
+ * - `#chirality`（反射を吸収する）の `change` で再計算が 1 回起きる
  * - (f) `canvas.getContext('2d')` が `null` を返す環境で `initDemo` が例外を投げず、
  *       (a)〜(e) がすべて成立する
  *
@@ -185,7 +187,7 @@ describe('m3-t1/AC-6: デモの DOM 結線（jsdom / stub engine 注入）', () 
     expect(engine.loadCandidates).toHaveBeenCalledTimes(1);
   });
 
-  it('(e) y 反転で識別力が潰れ、「識別力が潰れている」バッジが出る', async () => {
+  it('(e) 正規化 off で y 反転すると識別力が潰れ、「識別力が潰れている」バッジが出る', async () => {
     const engine = makeStubEngine();
     const demo = initDemo({ engine });
     await demo.whenSettled();
@@ -194,14 +196,57 @@ describe('m3-t1/AC-6: デモの DOM 結線（jsdom / stub engine 注入）', () 
     expect(discrimination.textContent).toContain('識別できている');
     expect(discrimination.querySelector('.teiresias-badge-collapsed')).toBeNull();
 
+    const chirality = document.getElementById('chirality') as HTMLInputElement;
+    chirality.checked = false;
+    chirality.dispatchEvent(new Event('change'));
     const checkbox = document.getElementById('y-flip') as HTMLInputElement;
     checkbox.checked = true;
     checkbox.dispatchEvent(new Event('change'));
     await demo.whenSettled();
 
+    expect(demo.getState().chirality).toBe('direct-only');
     expect(demo.getState().scene.discrimination.collapsed).toBe(true);
     expect(discrimination.textContent).toContain('識別力が潰れている');
     expect(discrimination.querySelector('.teiresias-badge-collapsed')).not.toBeNull();
+  });
+
+  it("(e') 正規化 on（既定）では y 反転しても識別できていて、真値が 1 位・yScale が負になる", async () => {
+    const engine = makeStubEngine();
+    const demo = initDemo({ engine });
+    await demo.whenSettled();
+
+    const chirality = document.getElementById('chirality') as HTMLInputElement;
+    expect(chirality.checked).toBe(true);
+    expect(demo.getState().chirality).toBe('normalize');
+
+    const checkbox = document.getElementById('y-flip') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change'));
+    await demo.whenSettled();
+
+    const scene = demo.getState().scene;
+    expect(scene.discrimination.collapsed).toBe(false);
+    expect(scene.ranked[0].id).toBe('EPSG:6674');
+    expect(scene.selected.worldFile.yScale).toBeLessThan(0);
+    const discrimination = document.getElementById('discrimination') as HTMLElement;
+    expect(discrimination.textContent).toContain('識別できている');
+    expect(discrimination.querySelector('.teiresias-badge-collapsed')).toBeNull();
+  });
+
+  it('#chirality の change で再計算が 1 回だけ起き、候補カタログは読み直さない', async () => {
+    const engine = makeStubEngine();
+    const demo = initDemo({ engine });
+    await demo.whenSettled();
+    const before = demo.getRecalcCount();
+
+    const chirality = document.getElementById('chirality') as HTMLInputElement;
+    chirality.checked = false;
+    chirality.dispatchEvent(new Event('change'));
+    await demo.whenSettled();
+
+    expect(demo.getRecalcCount()).toBe(before + 1);
+    expect(demo.getState().chirality).toBe('direct-only');
+    expect(engine.loadCandidates).toHaveBeenCalledTimes(1);
   });
 
   it('(b) #candidate-mode の change で候補モードが engine へ渡る', async () => {
