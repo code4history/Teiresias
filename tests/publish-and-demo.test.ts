@@ -199,7 +199,9 @@ describe('m3-t1/AC-12: ワークフローの静的検査（CI の検証ではな
       'path: Teiresias',
       'repository: code4history/Daedalus',
       'repository: code4history/Atlas',
-      'ref: master',
+      'node Teiresias/scripts/select-sibling-ref.mjs code4history/Daedalus code4history/Atlas',
+      'ref: ${{ steps.sibling.outputs.daedalus }}',
+      'ref: ${{ steps.sibling.outputs.atlas }}',
       'working-directory: Teiresias',
       'cache-dependency-path',
       'Teiresias/pnpm-lock.yaml',
@@ -216,6 +218,8 @@ describe('m3-t1/AC-12: ワークフローの静的検査（CI の検証ではな
     }
     // 起動ブランチの取り違え検出
     expect(deploy).not.toContain('- main');
+    // 兄弟の ref は固定せず、select-sibling-ref.mjs が選ぶ
+    expect(deploy).not.toContain('ref: master');
     expect(deploy).not.toContain('coi-serviceworker');
     expect(deploy).not.toContain('Cross-Origin-Opener-Policy');
   });
@@ -226,6 +230,9 @@ describe('m3-t1/AC-12: ワークフローの静的検査（CI の検証ではな
       'path: Teiresias',
       'repository: code4history/Daedalus',
       'repository: code4history/Atlas',
+      'node Teiresias/scripts/select-sibling-ref.mjs code4history/Daedalus code4history/Atlas',
+      'ref: ${{ steps.sibling.outputs.daedalus }}',
+      'ref: ${{ steps.sibling.outputs.atlas }}',
       'working-directory: Teiresias',
       'cache-dependency-path',
       'pnpm run test',
@@ -240,6 +247,8 @@ describe('m3-t1/AC-12: ワークフローの静的検査（CI の検証ではな
     }
     // 本ファイルはブランチ非限定である（設計 §6.5。Atlas 前例と同一）
     expect(ci).not.toContain('branches:');
+    // 兄弟の ref は固定せず、select-sibling-ref.mjs が選ぶ
+    expect(ci).not.toContain('ref: master');
   });
 
   it('Daedalus test.yml は単体 checkout で完結し、ブランチ非限定である', async () => {

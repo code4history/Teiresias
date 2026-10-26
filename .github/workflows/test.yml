@@ -14,15 +14,19 @@ jobs:
       - uses: actions/checkout@v4
         with:
           path: Teiresias
+      # 兄弟の ref: 同名 → base_ref → 兄弟に在る train/* → master
+      - name: Select sibling refs
+        id: sibling
+        run: node Teiresias/scripts/select-sibling-ref.mjs code4history/Daedalus code4history/Atlas
       - uses: actions/checkout@v4
         with:
           repository: code4history/Daedalus
-          ref: master
+          ref: ${{ steps.sibling.outputs.daedalus }}
           path: Daedalus
       - uses: actions/checkout@v4
         with:
           repository: code4history/Atlas
-          ref: master
+          ref: ${{ steps.sibling.outputs.atlas }}
           path: Atlas
 
       - name: Install pnpm
