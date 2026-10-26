@@ -36,6 +36,7 @@ import {
   outOfBboxPoints,
   planeAId,
   planeBId,
+  recommendedE2eGcps,
   unknownId,
 } from './fixtures/mockContractFixture.js';
 import {
@@ -53,6 +54,7 @@ import type {
   CandidateCrs,
   CandidateTransformer,
   EstimationResult,
+  GcpPair,
   GeoBasis,
 } from '../src/index.js';
 
@@ -74,8 +76,8 @@ function expectPointsClose(
 }
 
 describe('AC-T1 (a): Teiresias 所有 mock が fixture の期待値に一致する', () => {
-  it('fixture の版が契約文書の 1.0.0 である', () => {
-    expect(fixtureVersion).toBe('1.0.0');
+  it('fixture の版が契約文書の 1.0.1 である', () => {
+    expect(fixtureVersion).toBe('1.0.1');
     expect(candidateIds).toEqual([planeAId, planeBId]);
     expect(candidateDefinitions.map((d) => d.id)).toEqual([planeAId, planeBId]);
   });
@@ -664,5 +666,125 @@ describe('内部 helper の単体検証（公開 API から到達不能な分岐
     // similarityOnly=false なのに有限な sseSimilarity が無い -> dependency-contract-failure
     expect(basicRmsFromFit({ ...base, similarityOnly: false, rmsMeters: 3 }, 4)).toBeNull();
     expect(basicRmsFromFit({ ...base, similarityOnly: true, rmsMeters: null }, 4)).toBeNull();
+  });
+});
+
+describe('chirality 正規化: 候補ごとの双試行（unit）', () => {
+  /** pixel の v を反転した GCP セット（geo は不変）。 */
+  function flipPixelV(gcps: ReadonlyArray<GcpPair>): GcpPair[] {
+    return gcps.map((g) => ({ pixel: [g.pixel[0], -g.pixel[1]], geo: g.geo }));
+  }
+
+  /** 入力の planar 点をそのまま返す transformer（候補は 1 件だけ想定）。 */
+  const identityTransformer: CandidateTransformer = (_id, points) =>
+    points.map((p): [number, number] => [p[0], p[1]]);
+
+  /**
+   * v 反転で対応の集合そのものが変わらない（geo(u, v) = geo(u, -v)）GCP セット。
+   * direct と flip の SSE が一致し、Daedalus は similarity を採用し、yScale は 0 でない
+   * ∴ flip 側を採れば yScale の符号が反転して観測できる。
+   */
+  const symmetricGcps: GcpPair[] = [
+    [-10, -10],
+    [10, -10],
+    [-10, 10],
+    [10, 10],
+    [0, -5],
+    [0, 5],
+    [-20, 0],
+    [20, 0],
+  ].map(([u, v]) => ({
+    pixel: [u, v] as [number, number],
+    geo: [1000 + 100 * u + 30 * v * v + 0.5 * u * u, 2000 + 20 * v * v - 3 * u * u] as [number, number],
+  }));
+
+  it('同値（Z 述語の内）なら direct を採る（direct-only と同じ worldFile）', async () => {
+    const options = { transformer: identityTransformer, geoBasis: planar };
+    const normalized = await estimateCrs(symmetricGcps, [planeA], options);
+    const directOnly = await estimateCrs(symmetricGcps, [planeA], { ...options, chirality: 'direct-only' });
+
+    // 前提: 対称セットでは direct と flip の fit が一致し、yScale が 0 でない（取り違えれば観測できる）
+    const fitDirect = fitWorldFile(symmetricGcps, { geoBasis: planar, debug: true });
+    const fitFlip = fitWorldFile(flipPixelV(symmetricGcps), { geoBasis: planar, debug: true });
+    expect(fitDirect.debug?.sseSimilarity).toBe(fitFlip.debug?.sseSimilarity);
+    expect(fitDirect.similarityOnly).toBe(true);
+    expect(Math.abs(fitDirect.worldFile?.yScale as number)).toBeGreaterThan(1);
+
+    expect(normalized.selected?.worldFile).toEqual(directOnly.selected?.worldFile);
+    expect(normalized.selected?.worldFile).toEqual(fitDirect.worldFile);
+    expect(normalized.warnings).toEqual(directOnly.warnings);
+  });
+
+  it('transformer の呼び出し回数は正規化で増えない（候補数と等しい）', async () => {
+    const candidates = [planeA, planeB];
+    const count = async (chirality: 'normalize' | 'direct-only'): Promise<number> => {
+      let calls = 0;
+      const spy: CandidateTransformer = (id, points, basis) => {
+        calls += 1;
+        return mockTransformer(id, points, basis);
+      };
+      await estimateCrs(recommendedE2eGcps, candidates, { transformer: spy, chirality });
+      return calls;
+    };
+    const normalizeCalls = await count('normalize');
+    const directOnlyCalls = await count('direct-only');
+    expect(normalizeCalls).toBe(candidates.length);
+    expect(directOnlyCalls).toBe(candidates.length);
+  });
+
+  it('chirality を省略すると normalize と同じ結果になる（既定）', async () => {
+    const omitted = await estimateCrs(recommendedE2eGcps, [planeA, planeB], { transformer: mockTransformer });
+    const normalize = await estimateCrs(recommendedE2eGcps, [planeA, planeB], {
+      transformer: mockTransformer,
+      chirality: 'normalize',
+    });
+    expect(omitted).toEqual(normalize);
+    // 反射ありの入力で flip 側が採られている（既定が direct-only ではない）
+    expect(omitted.selected?.worldFile.yScale as number).toBeLessThan(0);
+    expect(omitted.selected?.identity).toEqual({ authority: 'MOCK', code: 'PLANE-A' });
+  });
+
+  it('選択なしの経路でも、採らなかった側の warning を外へ出さない', async () => {
+    // 反射ありの PLANE-A: direct 側は affine 採用、flip 側は similarity 厳密適合（affine 不採用）
+    // ∴ 両側の warnings が異なる。minCandidates を候補数より大きくして選択なしの経路に通す。
+    const reflected: ReadonlyArray<GcpPair> = recommendedE2eGcps;
+    const options = { transformer: mockTransformer, minCandidates: 2 };
+    const normalized = await estimateCrs(reflected, [planeA], options);
+    const flippedDirectOnly = await estimateCrs(flipPixelV(reflected), [planeA], {
+      ...options,
+      chirality: 'direct-only',
+    });
+    const reflectedDirectOnly = await estimateCrs(reflected, [planeA], {
+      ...options,
+      chirality: 'direct-only',
+    });
+
+    expect(normalized.selected).toBeNull();
+    expect(normalized.status).toBe('insufficient');
+    // 前提: 両側の warnings は異なる（検査が発火しうる）
+    expect(flippedDirectOnly.warnings).not.toEqual(reflectedDirectOnly.warnings);
+    // 採った側（flip）の warnings だけが返る
+    expect(normalized.warnings).toEqual(flippedDirectOnly.warnings);
+  });
+
+  it('flip 側を採ったら xSkew と yScale の符号だけを反転し、他の 4 値と RMS は採った側の値のまま', async () => {
+    const reflected: ReadonlyArray<GcpPair> = recommendedE2eGcps;
+    const normalized = await estimateCrs(reflected, [planeA], { transformer: mockTransformer });
+    const flipped = await estimateCrs(flipPixelV(reflected), [planeA], {
+      transformer: mockTransformer,
+      chirality: 'direct-only',
+    });
+    const a = normalized.selected?.worldFile as NonNullable<EstimationResult['selected']>['worldFile'];
+    const b = flipped.selected?.worldFile as NonNullable<EstimationResult['selected']>['worldFile'];
+    expect(a.xScale).toBe(b.xScale);
+    expect(a.xSkew).toBe(0 - b.xSkew);
+    expect(a.xOrigin).toBe(b.xOrigin);
+    expect(a.ySkew).toBe(b.ySkew);
+    expect(a.yScale).toBe(-b.yScale);
+    expect(a.yOrigin).toBe(b.yOrigin);
+    expect(normalized.selected?.rmsMeters).toBe(flipped.selected?.rmsMeters);
+    expect(normalized.selected?.qualityGate).toBe(flipped.selected?.qualityGate);
+    expect(normalized.warnings).toEqual(flipped.warnings);
+    expect(normalized.status).toBe(flipped.status);
   });
 });

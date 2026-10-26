@@ -16,6 +16,10 @@
         <input id="y-flip" type="checkbox">
         <span>y 軸を下向きにする</span>
       </label>
+      <label class="teiresias-toggle">
+        <input id="chirality" type="checkbox" checked>
+        <span>反射を吸収する（正規化）</span>
+      </label>
       <div class="c4h-divider"></div>
       <label>
         候補:
@@ -31,7 +35,7 @@
   </header>
 
   <div class="c4h-instructions">
-    操作: pixel 板のマーカーをドラッグすると GCP が動きます。y 軸を反転すると候補間の識別力が落ちます。
+    操作: pixel 板のマーカーをドラッグすると GCP が動きます。「反射を吸収する」を外して y 軸を反転すると候補間の識別力が落ちます。
   </div>
 
   <div id="note" class="c4h-note"></div>
@@ -88,17 +92,18 @@
 
   <div class="c4h-info-box">
     <p>
-      <strong>なぜ y 軸を反転すると識別力が潰れるのか。</strong>
+      <strong>正規化なしでは y 軸を反転すると識別力が潰れる。正規化ありでは反転しても正しく選ぶ。</strong>
       Daedalus の basic fit は<strong>相似変換</strong>（回転・等方スケール・平行移動）であり、
-      <strong>鏡映を表現できない</strong>。∴ pixel の y を反転させると、どの候補 CRS でも
-      同じくらい当てはまらなくなる ∴ 候補間の残差の差が消える。
-      これは Teiresias のバグではなく、world file を相似変換で当てる限り構造的にそうなる、という
-      <strong>観測可能な事実</strong>である。
+      <strong>鏡映を表現できない</strong>。∴ 正規化なしで pixel の y を反転させると、どの候補 CRS でも
+      同じくらい当てはまらなくなり、候補間の残差の差が消える。
+      「反射を吸収する（正規化）」が入のとき、Teiresias は相似変換のモデル自体は変えずに、
+      pixel の y を反転した入力でも当てて残差の小さい側を採る ∴ 画像の y 軸の向きに関係なく
+      同じ CRS が上位に来て、選ばれた world file の <code>yScale</code> の符号だけが向きに応じて分かれる。
     </p>
     <p>
       識別力は <code>rms[2位] / rms[1位]</code> で表示している。反射なしでは真値が厳密適合するため
-      比が巨大になり、反射ありでは 1.0 付近へ落ちる。候補を
-      <code>catalog</code>（既定カタログ全件）にすると、反射ありでは真値が 1 位から転落する様子も見える。
+      比が巨大になり、正規化なしの反射ありでは 1.0 付近へ落ちる。候補を
+      <code>catalog</code>（既定カタログ全件）にすると、正規化なしの反射ありでは真値が 1 位から転落する様子も見える。
     </p>
   </div>
 

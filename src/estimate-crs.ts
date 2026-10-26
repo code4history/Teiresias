@@ -261,6 +261,74 @@ interface UsableCandidate extends RankableCandidate {
   fit: FitResult;
 }
 
+/** 1 回の `fitWorldFile` の評価結果（候補ループの内部表現）。 */
+type FitEvaluation =
+  | { kind: 'usable'; fit: FitResult; basicRmsMeters: number }
+  | { kind: 'fit-insufficient' | 'dependency-contract-failure'; fit: FitResult };
+
+/** Daedalus で fit し、ranking に使えるか・失敗の分類を決める。 */
+function evaluateFit(gcps: readonly GcpPair[], epsilonMeters: number): FitEvaluation {
+  const fit = fitWorldFile(gcps, {
+    geoBasis: DAEDALUS_TARGET_BASIS,
+    normalizeEpsilonMeters: epsilonMeters,
+    debug: true,
+  });
+
+  const succeeded = fit.status === 'ok' || fit.status === 'ok_with_warnings';
+  if (!succeeded || fit.qualityGate === 'unusable') {
+    // Daedalus が正当に不足と判断した候補（ranked へ入れない。untransformableIds へも入れない）
+    return { kind: 'fit-insufficient', fit };
+  }
+  if (fit.worldFile === null || fit.rmsMeters === null || !Number.isFinite(fit.rmsMeters)) {
+    return { kind: 'dependency-contract-failure', fit };
+  }
+  const basicRmsMeters = basicRmsFromFit(fit, gcps.length);
+  if (basicRmsMeters === null || !Number.isFinite(basicRmsMeters)) {
+    return { kind: 'dependency-contract-failure', fit };
+  }
+  return { kind: 'usable', fit, basicRmsMeters };
+}
+
+/**
+ * pixel の v を反転した側（flip）を採るか。
+ *
+ * - 片方だけ使えるなら使える側を採る。両方使えなければ direct（今までの失敗の分類のまま）。
+ * - 両方使えるなら basic SSE（`basicRms² · n`）の小さい側を採る。差が機械精度の内
+ *   （`|SSE_direct − SSE_flip| <= 1024 · ε² · Σ(X² + Y²)`。和は変換後の geo 座標）なら direct を採る。
+ */
+function prefersFlip(
+  direct: FitEvaluation,
+  flip: FitEvaluation,
+  geo: ReadonlyArray<readonly [number, number]>,
+): boolean {
+  if (flip.kind !== 'usable') return false;
+  if (direct.kind !== 'usable') return true;
+
+  const n = geo.length;
+  const sseDirect = direct.basicRmsMeters * direct.basicRmsMeters * n;
+  const sseFlip = flip.basicRmsMeters * flip.basicRmsMeters * n;
+  let sumSquares = 0;
+  for (const [x, y] of geo) sumSquares += x * x + y * y;
+  const tolerance = 1024 * Number.EPSILON * Number.EPSILON * sumSquares;
+  if (Math.abs(sseDirect - sseFlip) <= tolerance) return false;
+  return sseFlip < sseDirect;
+}
+
+/**
+ * flip 側の fit を元の pixel 座標系へ戻す。`(u, −v)` への写像を `(u, v)` からの写像に直すと
+ * `xSkew` と `yScale` の符号だけが反転する（他の 4 値・RMS・gate・warnings は不変）。
+ * `0 - x` は 0 を -0 にしない。
+ */
+function unflipFit(evaluation: FitEvaluation): FitEvaluation {
+  const worldFile = evaluation.fit.worldFile;
+  if (worldFile === null) return evaluation;
+  const fit: FitResult = {
+    ...evaluation.fit,
+    worldFile: { ...worldFile, xSkew: 0 - worldFile.xSkew, yScale: 0 - worldFile.yScale },
+  };
+  return { ...evaluation, fit };
+}
+
 const EMPTY_RESULT_SHAPE = {
   status: 'insufficient' as const,
   selected: null,
@@ -284,6 +352,7 @@ export async function estimateCrs(
   const epsilonMeters = normalizeEpsilonMeters(options.normalizeEpsilonMeters);
   const minCandidates = normalizePositiveInteger(options.minCandidates, 1);
   const isEmptyInput = gcps.length === 0;
+  const chirality = options.chirality === 'direct-only' ? 'direct-only' : 'normalize';
 
   // 非空 L_geo gate（設計 K15）。候補共通の score 分母が成立しない時点で候補 loop を開始しない。
   // 未呼出しの候補を「変換不能」と記録してはならない ∴ untransformableIds も空で返す。
@@ -346,29 +415,26 @@ export async function estimateCrs(
       geo: transformed[index],
     }));
 
-    const fit = fitWorldFile(transformedGcps, {
-      geoBasis: DAEDALUS_TARGET_BASIS,
-      normalizeEpsilonMeters: epsilonMeters,
-      debug: true,
-    });
-    fitReachedWarnings.push(...fit.warnings);
-
-    const succeeded = fit.status === 'ok' || fit.status === 'ok_with_warnings';
-    if (!succeeded || fit.qualityGate === 'unusable') {
-      // Daedalus が正当に不足と判断した候補（ranked へ入れない。untransformableIds へも入れない）
-      failureClasses.push('fit-insufficient');
-      continue;
-    }
-    if (fit.worldFile === null || fit.rmsMeters === null || !Number.isFinite(fit.rmsMeters)) {
-      failureClasses.push('dependency-contract-failure');
-      continue;
+    const direct = evaluateFit(transformedGcps, epsilonMeters);
+    let chosen = direct;
+    if (chirality === 'normalize') {
+      // 反射の吸収: pixel の v を反転した入力も当てる（geo 側は同じ。transformer は呼び直さない）
+      const flippedGcps: GcpPair[] = transformedGcps.map((gcp) => ({
+        pixel: [gcp.pixel[0], -gcp.pixel[1]],
+        geo: gcp.geo,
+      }));
+      const flip = evaluateFit(flippedGcps, epsilonMeters);
+      if (prefersFlip(direct, flip, transformed)) chosen = unflipFit(flip);
     }
 
-    const basicRmsMeters = basicRmsFromFit(fit, transformedGcps.length);
-    if (basicRmsMeters === null || !Number.isFinite(basicRmsMeters)) {
-      failureClasses.push('dependency-contract-failure');
+    // 採らなかった側の warning は外へ出さない
+    fitReachedWarnings.push(...chosen.fit.warnings);
+
+    if (chosen.kind !== 'usable') {
+      failureClasses.push(chosen.kind);
       continue;
     }
+    const { fit, basicRmsMeters } = chosen;
 
     const score =
       Number.isFinite(observationScale) && observationScale > 0

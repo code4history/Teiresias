@@ -6,6 +6,10 @@
  * - (b) 反射なしの `rms[2位]/rms[1位]` が `1e6` を超える
  * - (c) 反射ありで同比が `1.01` 未満に落ちる（= 識別力が潰れる）
  * - (d) 既定カタログ + 反射ありで真値が `ranked[0]` から外れる
+ *
+ * (c)(d) はデモの「反射を吸収する」を外した側（`chirality: 'direct-only'`）の固定である。
+ * 正規化あり（既定）の側は (c')(d') が固定する — 反射の有無によらず真値の縮退クラスが上位を
+ * 占め、選ばれた world file の `yScale` の符号だけが分かれる。
  * - (e) GCP を 1 点だけ動かすと `ranked` の並びまたは `rmsMeters` が変わる
  *
  * **デモの画面に出る数値そのものは固定しない**（GCP を動かせば値は変わるのが正しい）。
@@ -36,6 +40,7 @@ const geoPoints = GCP_LONLAT.map((point) => [point[0], point[1]] as [number, num
 interface SceneInput {
   mode: 'zones' | 'catalog';
   yFlip: boolean;
+  chirality?: 'normalize' | 'direct-only';
   mutate?: (pixels: Array<[number, number]>) => void;
 }
 
@@ -55,7 +60,7 @@ function contextFor(mode: 'zones' | 'catalog') {
   return cache.get(mode)!;
 }
 
-async function scene({ mode, yFlip, mutate }: SceneInput) {
+async function scene({ mode, yFlip, chirality, mutate }: SceneInput) {
   const { candidates, basePixels } = await contextFor(mode);
   const pixels = basePixels.map((point) => [point[0], point[1]] as [number, number]);
   mutate?.(pixels);
@@ -63,6 +68,7 @@ async function scene({ mode, yFlip, mutate }: SceneInput) {
     pixels,
     geoPoints,
     yFlip,
+    chirality,
     candidates,
     transformer: makeTransformer(candidates as never),
   });
@@ -85,23 +91,39 @@ describe('m3-t1/AC-5: デモの現象を実 Atlas engine で固定する', () =>
     expect(collapsed).toBe(false);
   }, 30_000);
 
-  it('(c) 反射ありで同じ比が 1.01 未満へ落ちる（識別力が潰れる）', async () => {
-    const result = await scene({ mode: 'zones', yFlip: true });
+  it('(c) 正規化なし（direct-only）: 反射ありで同じ比が 1.01 未満へ落ちる（識別力が潰れる）', async () => {
+    const result = await scene({ mode: 'zones', yFlip: true, chirality: 'direct-only' });
     const { ratio, collapsed } = result.discrimination;
     expect(ratio).not.toBeNull();
     expect(ratio as number).toBeLessThan(COLLAPSE_THRESHOLD);
     expect(collapsed).toBe(true);
   }, 30_000);
 
-  it('(d) 既定カタログ + 反射ありでは真値が ranked[0] から外れる', async () => {
-    const reflected = await scene({ mode: 'catalog', yFlip: true });
-    const forward = await scene({ mode: 'catalog', yFlip: false });
+  it('(d) 正規化なし（direct-only）: 既定カタログ + 反射ありでは真値が ranked[0] から外れる', async () => {
+    const reflected = await scene({ mode: 'catalog', yFlip: true, chirality: 'direct-only' });
+    const forward = await scene({ mode: 'catalog', yFlip: false, chirality: 'direct-only' });
 
     expect(reflected.ranked.length).toBeGreaterThan(3);
     expect(reflected.ranked[0].id).not.toBe(TRUE_ID);
     expect(reflected.ranked.some((entry) => entry.isTruth)).toBe(true);
     // 反射なしでは真値が縮退クラスごと先頭 3 件に入る（対照）
     expect(forward.ranked.slice(0, 3).some((entry) => entry.isTruth)).toBe(true);
+  }, 30_000);
+
+  it("(c') 正規化あり（既定）: 反射ありでも真値が ranked[0] で識別できていて、yScale が負", async () => {
+    const result = await scene({ mode: 'zones', yFlip: true });
+    expect(result.ranked[0].id).toBe(TRUE_ID);
+    expect(result.discrimination.collapsed).toBe(false);
+    expect(result.selected?.worldFile.yScale as number).toBeLessThan(0);
+  }, 30_000);
+
+  it("(d') 正規化あり（既定）: 既定カタログで y の向きによらず真値が先頭 3 件に入り、yScale の符号だけが分かれる", async () => {
+    const reflected = await scene({ mode: 'catalog', yFlip: true });
+    const forward = await scene({ mode: 'catalog', yFlip: false });
+    expect(reflected.ranked.map((entry) => entry.id)).toEqual(forward.ranked.map((entry) => entry.id));
+    expect(reflected.ranked.slice(0, 3).some((entry) => entry.isTruth)).toBe(true);
+    expect(forward.selected?.worldFile.yScale as number).toBeGreaterThan(0);
+    expect(reflected.selected?.worldFile.yScale as number).toBeLessThan(0);
   }, 30_000);
 
   it('(e) GCP を 1 点だけ動かすと ranked の並びまたは rmsMeters が変わる', async () => {

@@ -51,7 +51,12 @@ const fullOptions: EstimateOptions = {
   topK: 2,
   normalizeEpsilonMeters: 100,
   datumFamilyPrior: ['MOCKDATUM'],
+  chirality: 'normalize',
 };
+
+/** `chirality` は 2 値の union（既定 'normalize'）。 */
+const chiralityValues: ReadonlyArray<NonNullable<EstimateOptions['chirality']>> = ['normalize', 'direct-only'];
+const directOnlyOptions: EstimateOptions = { transformer: syncTransformer, chirality: 'direct-only' };
 
 const minimalOptions: EstimateOptions = { transformer: asyncTransformer };
 
@@ -155,6 +160,10 @@ describe('api smoke（公開型と estimateCrs signature の compile-time 束縛
     expect(candidate.datumFamily).toBe('MOCKDATUM');
     expect(candidateWithoutDatumFamily.datumFamily).toBeUndefined();
     expect(fullOptions.datumFamilyPrior).toEqual(['MOCKDATUM']);
+    expect(fullOptions.chirality).toBe('normalize');
+    expect(directOnlyOptions.chirality).toBe('direct-only');
+    expect(chiralityValues).toEqual(['normalize', 'direct-only']);
+    expect(minimalOptions.chirality).toBeUndefined();
     expect(minimalOptions.geoBasis).toBeUndefined();
     expect(gcps).toHaveLength(2);
     expect(Object.keys(worldFile)).toEqual([

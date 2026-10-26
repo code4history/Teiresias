@@ -161,6 +161,10 @@ export const conformingTransformers: ReadonlyArray<CandidateTransformer> = [
  *
  * 反射ありの `recommendedE2eGcps` に対する実測挙動は
  * `tests/estimate-crs.e2e.test.ts` の「実測固定」節でそのまま固定してある（発見事項の可視化）。
+ * その節は `chirality: 'direct-only'`（反射を吸収しない経路）を渡している。`estimateCrs` の
+ * 既定（chirality 正規化）では、`recommendedE2eGcps` でも PLANE-A が ranked[0] になり
+ * yScale が負の WorldFile が返る（同ファイルの「chirality 正規化（既定）」節）。
+ * 本セットは正規化に依存しない反射なしの基準として残す。
  *
  *   pixel (u,v) -> lon = 135 + u*0.0078125, lat = 35 + v*0.0078125
  * 期待（PLANE-A・basic similarity で厳密適合）:

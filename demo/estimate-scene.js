@@ -99,12 +99,18 @@ export function discriminationOf(ranked) {
  * 1 シーンを計算する。
  *
  * `yFlip` は**ここで**適用する（呼出側は反転前の pixel を持ち続ける）。
+ * `chirality` は `estimateCrs` の同名 option へそのまま渡す（省略時は `estimateCrs` の既定 =
+ * 正規化あり）。デモ側で別の推定を書かず、同じ `estimateCrs` で「正規化あり／なし」を出す。
  * 返り値の `ranked` は各行に `id`（`${authority}:${code}`）と `isTruth` を付す。
  */
-export async function runScene({ pixels, geoPoints, yFlip, candidates, transformer, options }) {
+export async function runScene({ pixels, geoPoints, yFlip, chirality, candidates, transformer, options }) {
   const effectivePixels = applyYFlip(pixels, yFlip);
   const gcpPairs = toGcpPairs(effectivePixels, geoPoints);
-  const result = await estimateCrs(gcpPairs, candidates, { transformer, ...(options ?? {}) });
+  const result = await estimateCrs(gcpPairs, candidates, {
+    transformer,
+    ...(chirality === undefined ? {} : { chirality }),
+    ...(options ?? {}),
+  });
 
   const ranked = result.ranked.map((entry, index) => {
     const id = `${entry.authority}:${entry.code}`;

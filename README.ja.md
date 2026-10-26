@@ -27,6 +27,7 @@ const result: EstimationResult = await estimateCrs(gcps, candidates, {
   topK,                        // 省略時 usable 全件
   normalizeEpsilonMeters,      // 省略時 100（m）
   datumFamilyPrior,            // 省略時 中立（prior なし）
+  chirality,                   // 省略時 'normalize'。'direct-only' は反射を吸収しない
 });
 ```
 
@@ -70,6 +71,21 @@ Daedalus へ常に `{ kind: 'planar_xy', axisOrder: 'xy', unit: 'm' }` を渡し
   確率・信頼度ではない。
 - 同着（機械精度内）のときだけ `datumFamilyPrior` の指定順が働く。prior は明確な fit 差を逆転しない。
   最後は identity の code-unit 順で決定的に閉じる。
+
+### pixel の y 軸の反射（`chirality`）
+
+走査した画像は pixel の y 軸が下向きで、投影座標の北は上向きであることが多い ∴ pixel から地上への
+写像は反射を含む。相似変換（回転・等方スケール・平行移動）は反射を表現できないため、何もしなければ
+どの候補も同じくらい当てはまらなくなり、順位が候補を見分ける力を失う。
+
+`chirality: 'normalize'`（既定）では、相似変換のモデル自体は変えずに、候補ごとに pixel の v を反転した
+同じ点でも当て、basic の残差二乗和の小さい側を採る（機械精度内の同値なら反転しない側）。反転した側を
+採ったら、返す `worldFile` の `xSkew` と `yScale` の符号を反転して元の pixel 座標の写像に戻す。
+`rmsMeters`・`qualityGate`・`warnings`・`status` は採った側の値で、採らなかった側の warning は返さない。
+transformer の呼び出しは候補ごとに 1 回のまま変わらない。反射を吸収したかは `selected.worldFile` の
+行列式の符号（`xScale * yScale - xSkew * ySkew < 0`）で分かる。
+
+`chirality: 'direct-only'` は反転を試さず、正規化しないときの挙動になる。
 
 ### `rmsMeters` の意味の違い（重要）
 
@@ -116,7 +132,8 @@ final RMS を別名で公開する API は無い。
     実在することを機械検証する。CI（`.github/workflows/{test,deploy}.yml`）から継続的に走る。
   - **browser runtime = 手動で 1 回確認済み**: 2026-08-29 に `demo/crs-estimate-ranking.html`
     を実ブラウザで開き、proj-wasm の初期化・候補順位・y 軸反転による識別力の消滅・GCP ドラッグによる
-    順位入替を確かめた。**1 回の手動確認であって自動テストではない ∴ 回帰は防げない。**
+    順位入替を確かめた。この確認は反射の扱い（`chirality`）より前のもので、今の既定ではデモで正規化を
+    外さない限り y 軸を反転しても識別力は潰れない。**1 回の手動確認であって自動テストではない ∴ 回帰は防げない。**
   - **CI 上での継続的・自動のブラウザ実行と canvas ドラッグの自動操作 = 未対応。**
 - **実 engine の E2E は接続済み**: `tests/estimate-crs.real-engine.e2e.test.ts` が実 CRS engine
   （Atlas / proj-wasm）を注入した E2E を持つ。mock E2E（`estimate-crs.e2e.test.ts`）は
