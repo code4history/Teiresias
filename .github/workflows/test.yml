@@ -1,58 +1,73 @@
 name: CI
 
-# ブランチ非限定（Atlas 前例と同一）∴ branches キーを持たない。
+# Runs on every branch (no branches key).
 on:
   push:
   pull_request:
 
+permissions:
+  contents: read
+
 jobs:
   test:
-    name: Test
+    name: Test (Node ${{ matrix.node-version }})
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: [22, 24]
     steps:
-      # 兄弟 checkout（設計 §6.4 / K10）。deploy.yml と同一構成である。
-      - uses: actions/checkout@v4
+      # Atlas and Daedalus are checked out next to this repository; ci/pnpm-workspace.ci.yaml
+      # resolves @c4h/atlas and @c4h/daedalus to them with link: overrides.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: Teiresias
-      # 兄弟の ref: 同名 → base_ref → 兄弟に在る train/* → master
+          persist-credentials: false
+      # Sibling ref: same name, then base ref, then the latest train/* branch, then master.
       - name: Select sibling refs
         id: sibling
         run: node Teiresias/scripts/select-sibling-ref.mjs code4history/Daedalus code4history/Atlas
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: code4history/Daedalus
           ref: ${{ steps.sibling.outputs.daedalus }}
           path: Daedalus
-      - uses: actions/checkout@v4
+          persist-credentials: false
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           repository: code4history/Atlas
           ref: ${{ steps.sibling.outputs.atlas }}
           path: Atlas
+          persist-credentials: false
 
       - name: Install pnpm
-        uses: pnpm/action-setup@v4
+        uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
         with:
-          version: 10
+          version: 11.27.0
       - name: Setup Node.js
-        uses: actions/setup-node@v4
+        uses: actions/setup-node@249970729cb0ef3589644e2896645e5dc5ba9c38 # v6.5.0
         with:
-          node-version: 22
+          node-version: ${{ matrix.node-version }}
           cache: pnpm
           cache-dependency-path: |
             Teiresias/pnpm-lock.yaml
             Atlas/pnpm-lock.yaml
             Daedalus/pnpm-lock.yaml
 
+      # Each repository keeps its pnpm settings in ci/pnpm-workspace.ci.yaml (pnpm 11 reads
+      # them only from pnpm-workspace.yaml, which is not committed).
       - name: Build Daedalus
         working-directory: Daedalus
-        run: pnpm install && pnpm run build
+        run: cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml && pnpm install --frozen-lockfile && pnpm run build
       - name: Build Atlas
         working-directory: Atlas
-        run: pnpm install && pnpm run build
+        run: cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml && pnpm install --frozen-lockfile && pnpm run build
 
+      - name: Use CI pnpm settings
+        working-directory: Teiresias
+        run: cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml
       - name: Install dependencies
         working-directory: Teiresias
-        run: pnpm install
+        run: pnpm install --frozen-lockfile
       - name: Run tests
         working-directory: Teiresias
         run: pnpm run test
@@ -68,6 +83,11 @@ jobs:
       - name: Build package
         working-directory: Teiresias
         run: pnpm run build
+      # Packs Atlas, Daedalus and this package, installs the three tarballs into an empty
+      # directory and runs the estimate through the public imports only.
+      - name: Consumer smoke test
+        working-directory: Teiresias
+        run: pnpm run smoke:consumer
       - name: Verify demo Pages artifact
         working-directory: Teiresias
         run: pnpm run verify:demo
