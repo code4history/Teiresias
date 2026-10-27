@@ -20,8 +20,8 @@
  * child process that ends with process.exit.
  *
  * Adding a scene: append one element to SCENES. The flow (candidates -> transformer ->
- * estimate) and the way GCPs are made (the truth CRS projects five points of the query extent,
- * which are scaled into pixels) do not depend on the scene; a scene only carries values and
+ * estimate) and the way GCPs are made (the unit of the truth CRS projects five points of the query
+ * extent, which are scaled into pixels) do not depend on the scene; a scene only carries values and
  * its check.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
@@ -80,6 +80,20 @@ export const SCENES = [
       return { ok: typeof yScale === 'number' && yScale < 0, reason: `selected.worldFile.yScale = ${yScale}` };
     },
   },
+  {
+    id: 'd-utjcp-y-down',
+    query: { extent: KYOTO, area: 'Japan', onshoreOnly: false, includeCustomProjections: true },
+    truthId: 'UTJCP:ZONE-B',
+    pixelSpec: { metresPerPixel: 10, yDown: true },
+    check: (result) => {
+      const top = result.ranked.length === 0 ? '(none)' : idOf(result.ranked[0]);
+      const metresPerUnit = result.selected?.unit?.metresPerUnit;
+      return {
+        ok: top === 'UTJCP:ZONE-B' && metresPerUnit === 0.9143985307444408,
+        reason: `ranked[0] = ${top}; selected.unit.metresPerUnit = ${metresPerUnit}`,
+      };
+    },
+  },
 ];
 
 /** Five points spread over the extent (not collinear), as lon/lat in lon-lat order. */
@@ -95,8 +109,9 @@ async function runScene(scene, atlas, teiresias) {
     const truth = candidates.find((row) => row.id === scene.truthId);
     if (truth === undefined) return { id: scene.id, ok: false, reason: `${scene.truthId} is not among the candidates` };
     const lonlat = pointsIn(scene.query.extent);
-    const projected = await atlas.transformLonLatArrayToProjected(truth, lonlat);
-    if (projected === null) return { id: scene.id, ok: false, reason: `${scene.truthId} cannot project the points` };
+    const converted = await atlas.transformLonLatToCandidate(truth, lonlat);
+    if (converted === null) return { id: scene.id, ok: false, reason: `${scene.truthId} cannot project the points` };
+    const projected = converted.points;
     const e0 = Math.min(...projected.map((p) => p[0]));
     const n0 = Math.min(...projected.map((p) => p[1]));
     const { metresPerPixel, yDown } = scene.pixelSpec;

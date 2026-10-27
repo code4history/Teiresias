@@ -57,6 +57,8 @@ import type {
   FitWarning,
   GcpPair,
   GeoBasis,
+  LinearUnit,
+  WorldFile,
 } from '../src/index.js';
 
 const lonlat: GeoBasis = geoBasisLonLat;
@@ -1295,5 +1297,143 @@ describe('holdout', () => {
       kind: 'adapter-contract-failure',
       message: 'expected 7 points, got 6',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 単位つきの候補: `{ points, unit }` は metre へ換算してから当てはめ、結果に単位を添える
+// ---------------------------------------------------------------------------
+
+/** 1 yard = 0.9143985307444408 m（都市計画図の格子の単位と同じ換算）。 */
+const METRES_PER_YARD = 0.9143985307444408;
+const yardUnit: LinearUnit = { name: 'yard', metresPerUnit: METRES_PER_YARD };
+const metreUnit: LinearUnit = { name: 'metre', metresPerUnit: 1 };
+
+/**
+ * 同じ地面の座標を metre の配列で返す候補（unit なし = 従来の形）。
+ * `teiresiasE2eGcps` に対しては PLANE-A が真値になる。
+ */
+const metreCandidate = (
+  id: string,
+  points: ReadonlyArray<readonly [number, number]>,
+  geoBasis: GeoBasis,
+): Array<[number, number]> | null => mockTransformer(id, points, geoBasis);
+
+/** 同じ地面の座標を yard で返す候補（metre の値を換算係数で割った点列 + unit）。 */
+const yardCandidate: CandidateTransformer = (id, points, geoBasis) => {
+  const metres = mockTransformer(id, points, geoBasis);
+  if (metres === null) return null;
+  return {
+    points: metres.map(([easting, northing]): [number, number] => [
+      easting / METRES_PER_YARD,
+      northing / METRES_PER_YARD,
+    ]),
+    unit: yardUnit,
+  };
+};
+
+/** 返却を `{ points, unit }` に包み、unit だけを差し替える候補（不正な unit の注入用）。 */
+const candidateWithUnit = (unit: unknown): CandidateTransformer =>
+  ((id, points, geoBasis) => {
+    const metres = mockTransformer(id, points, geoBasis);
+    if (metres === null) return null;
+    return { points: metres, unit } as never;
+  }) as CandidateTransformer;
+
+/** 相対 1e-9 以内か（0 と 0 は一致とみなす）。 */
+function expectRelativelyClose(actual: number, expected: number): void {
+  expect(Math.abs(actual - expected)).toBeLessThanOrEqual(1e-9 * Math.max(1, Math.abs(expected)));
+}
+
+/** worldFile の 6 値を定義順に並べる。 */
+function worldFileValues(worldFile: WorldFile): number[] {
+  return [
+    worldFile.xScale,
+    worldFile.xSkew,
+    worldFile.xOrigin,
+    worldFile.ySkew,
+    worldFile.yScale,
+    worldFile.yOrigin,
+  ];
+}
+
+describe('単位つきの候補（{ points, unit }）', () => {
+  it('同じ地面座標を metre で返す候補と yard で返す候補は rmsMeters が相対 1e-9 以内で一致する', async () => {
+    const x = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: metreCandidate });
+    const y = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: yardCandidate });
+
+    expect(x.status).toBe('ok_with_warnings');
+    expect(y.status).toBe('ok_with_warnings');
+    expect(x.failure).toBeNull();
+    expect(y.failure).toBeNull();
+    expect(y.untransformableIds).toEqual([]);
+    expect(x.selected?.identity).toEqual(y.selected?.identity);
+    expect(x.selected?.qualityGate).toBe(y.selected?.qualityGate);
+    expectRelativelyClose(y.selected?.rmsMeters as number, x.selected?.rmsMeters as number);
+    expectRelativelyClose(y.ranked[0].rmsMeters, x.ranked[0].rmsMeters);
+  });
+
+  it('selected.unit と ranked[].unit は候補が返した単位で、配列を返す候補は metre である', async () => {
+    const metreResult = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: metreCandidate });
+    expect(metreResult.selected?.unit).toEqual(metreUnit);
+    expect(metreResult.ranked[0].unit).toEqual(metreUnit);
+
+    const yardResult = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: yardCandidate });
+    expect(yardResult.selected?.unit).toEqual(yardUnit);
+    expect(yardResult.ranked[0].unit).toEqual(yardUnit);
+  });
+
+  it('yard の候補の selected.worldFile は 6 値とも metre の値 ÷ 換算係数である', async () => {
+    const metreResult = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: metreCandidate });
+    const yardResult = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: yardCandidate });
+
+    const metres = worldFileValues(metreResult.selected?.worldFile as WorldFile);
+    const yards = worldFileValues(yardResult.selected?.worldFile as WorldFile);
+    expect(yards).toHaveLength(metres.length);
+    for (let index = 0; index < metres.length; index++) {
+      expectRelativelyClose(yards[index], metres[index] / METRES_PER_YARD);
+    }
+  });
+
+  it('holdout も同じ倍率で換算され、metre の候補と同じ identity・RMS になる', async () => {
+    const holdout: readonly GcpPair[] = [{ pixel: [2, 7], geo: [135.015625, 35.0546875] }];
+    const x = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: metreCandidate, holdout });
+    const y = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: yardCandidate, holdout });
+
+    expect(y.status).toBe(x.status);
+    expect(y.selected?.identity).toEqual(x.selected?.identity);
+    expectRelativelyClose(y.selected?.rmsMeters as number, x.selected?.rmsMeters as number);
+    expect(y.untransformableIds).toEqual([]);
+  });
+
+  it('不正な unit（0・負・NaN・空の name）は adapter-contract-failure で failed になる', async () => {
+    const invalidUnits: unknown[] = [
+      { name: 'yard', metresPerUnit: 0 },
+      { name: 'yard', metresPerUnit: -1 },
+      { name: 'yard', metresPerUnit: Number.NaN },
+      { name: '', metresPerUnit: 1 },
+    ];
+
+    for (const unit of invalidUnits) {
+      const result = await estimateCrs(teiresiasE2eGcps, [planeA], {
+        transformer: candidateWithUnit(unit),
+      });
+      expect(result.status).toBe('failed');
+      expect(result.selected).toBeNull();
+      expect(result.untransformableIds).toEqual(['MOCK:PLANE-A']);
+      expect(result.failure).toEqual({
+        reason: 'implementation-failure',
+        candidates: [{ id: 'MOCK:PLANE-A', kind: 'adapter-contract-failure', message: 'invalid unit' }],
+      });
+    }
+  });
+
+  it('正の有限の metresPerUnit と空でない name を持つ unit は受理される', async () => {
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA], {
+      transformer: candidateWithUnit({ name: 'US survey foot', metresPerUnit: 1200 / 3937 }),
+    });
+    expect(result.status).toBe('ok_with_warnings');
+    expect(result.untransformableIds).toEqual([]);
+    expect(result.selected?.unit).toEqual({ name: 'US survey foot', metresPerUnit: 1200 / 3937 });
   });
 });
