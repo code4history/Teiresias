@@ -1,5 +1,5 @@
 /**
- * CRS 推定オーケストレーション（m1-t1 設計 §4〜§6）。
+ * CRS 推定オーケストレーション。
  *
  * 候補ごとに `transformer -> @c4h/daedalus.fitWorldFile -> basic score` を評価し、
  * 決定的な順位と選択結果を返す。
@@ -8,7 +8,7 @@
  * `package.json` の `exports` は `"."` のみで、`src/index.ts` は `estimateCrs` だけを公開する。
  * 本ファイルが export する内部 helper は**公開 API ではない**。現行公開 API から到達不能な
  * 分岐（score null-last、`status:'ok'`）を単体検証するため、tests だけが `../src/` から
- * 直接 import する（設計 K14 / 設計レビュー INF-5 の承認済み手法）。
+ * 直接 import する。
  */
 import { fitWorldFile } from '@c4h/daedalus';
 import type { FitResult, FitStatus, FitWarning, GcpPair, GeoBasis, QualityGate, WorldFile } from '@c4h/daedalus';
@@ -24,13 +24,13 @@ import type {
   LinearUnit,
 } from './types.js';
 
-/** 仕様正本 v0.3 の既定 epsilon（m）。Daedalus の gate と揃える。 */
+/** 既定 epsilon（m）。Daedalus の gate と揃える。 */
 const DEFAULT_NORMALIZE_EPSILON_METERS = 100;
 /** 1 度あたりの概算メートル（Daedalus `similarity.ts` の L_geo 近似と同じ定数）。 */
 const METRES_PER_DEGREE = 111320;
 /** 国際フィート -> メートル。 */
 const METRES_PER_FOOT = 0.3048;
-/** score 同着の許容係数（設計 K11。機械精度由来の許容だけに限定する）。 */
+/** score 同着の許容係数（機械精度由来の許容だけに限定する）。 */
 const TIE_EPSILON_FACTOR = 64;
 /** transformer の呼び出し 1 回の既定の上限（ms）。 */
 const DEFAULT_TIMEOUT_MS = 120_000;
@@ -38,18 +38,18 @@ const DEFAULT_TIMEOUT_MS = 120_000;
 const FAILURE_MESSAGE_MAX_LENGTH = 500;
 
 /**
- * Daedalus へ渡す basis は常にこれ（設計 K7）。
+ * Daedalus へ渡す basis は常にこれ。
  * transformer の成功出力は metre に換算した projected `[easting, northing]` として当てはめる
  * （`{ points, unit }` は `metresPerUnit` 倍して metre に直す）。
  * 入力側 `geoBasis` をそのまま Daedalus へ渡してはならない。
  */
 const DAEDALUS_TARGET_BASIS: GeoBasis = { kind: 'planar_xy', axisOrder: 'xy', unit: 'm' };
 
-/** 入力 `geoBasis` の既定（設計 §4 契約(2)）。 */
+/** 入力 `geoBasis` の既定。 */
 const DEFAULT_SOURCE_BASIS: GeoBasis = { kind: 'lonlat_deg', axisOrder: 'lon-lat' };
 
 /**
- * candidate 単位の失敗分類（設計 §4.2）。公開しない内部語彙である。
+ * candidate 単位の失敗分類。公開しない内部語彙である。
  * `adapter-contract-failure` / `adapter-bug` / `dependency-contract-failure` が
  * 「実装失敗」であり、1 件でもあれば top-level を `failed` にする（公開の `CandidateFailureKind`
  * はこの 3 つに打ち切り `adapter-timeout` を足したもの）。
@@ -69,7 +69,7 @@ const IMPLEMENTATION_FAILURE_CLASSES: ReadonlySet<CandidateFailureClass> = new S
   'dependency-contract-failure',
 ]);
 
-/** ranking の入力となる最小構造（設計 §5.4）。 */
+/** ranking の入力となる最小構造。 */
 export interface RankableCandidate {
   authority: string;
   code: string;
@@ -99,7 +99,7 @@ function normalizeTimeoutMs(value: number | undefined): number {
   return value;
 }
 
-/** 有限かつ 0 より大きい値だけを受理し、それ以外は既定 100 m へ落とす（設計 K8）。 */
+/** 有限かつ 0 より大きい値だけを受理し、それ以外は既定 100 m へ落とす。 */
 export function normalizeEpsilonMeters(value: number | undefined): number {
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) {
     return DEFAULT_NORMALIZE_EPSILON_METERS;
@@ -108,7 +108,7 @@ export function normalizeEpsilonMeters(value: number | undefined): number {
 }
 
 /**
- * 入力 GCP 全体に共通する観測域スケール `L_geo`（m）を算出する（設計 §5.3）。
+ * 入力 GCP 全体に共通する観測域スケール `L_geo`（m）を算出する。
  * 空入力・非有限座標では `NaN` を返す（候補共通の score 分母が成立しない）。
  */
 export function computeObservationScale(
@@ -144,7 +144,7 @@ export function computeObservationScale(
 }
 
 /**
- * shear 前 basic RMS を Daedalus の返却から一意に取り出す（設計 §5.2）。
+ * shear 前 basic RMS を Daedalus の返却から一意に取り出す。
  *
  * - `debug.sseSimilarity` が有限なら `sqrt(sseSimilarity / n)`。
  * - 無く、かつ `similarityOnly === true` なら選択モデル自体が basic ∴ `rmsMeters`。
@@ -162,7 +162,7 @@ export function basicRmsFromFit(fit: FitResult, n: number): number | null {
   return null;
 }
 
-/** score の同着判定（設計 K11。機械精度由来の許容だけ）。 */
+/** score の同着判定（機械精度由来の許容だけ）。 */
 export function areScoresTied(a: number, b: number): boolean {
   return Math.abs(a - b) <= TIE_EPSILON_FACTOR * Number.EPSILON * Math.max(1, Math.abs(a), Math.abs(b));
 }
@@ -194,7 +194,7 @@ function comparePriorThenIdentity(
 }
 
 /**
- * 決定的 ranking（設計 §5.4 / K16）。
+ * 決定的 ranking。
  *
  * 1. finite score を数値の厳密昇順、同値なら identity の code-unit 順で整列する（厳密な全順序）。
  *    null score は finite の後へ分離し identity 順で整列する。
@@ -250,7 +250,7 @@ export function rankCandidates<T extends RankableCandidate>(
 /**
  * 成功時の status 導出。
  *
- * 実 Daedalus の成功 fit は、holdout を渡して affine が採用されたとき（Daedalus の行 8）だけ
+ * 実 Daedalus の成功 fit は、holdout を渡して affine が採用されたときだけ
  * warning が 0 件になる ∴ 公開 API で `'ok'` になるのはその場合だけで、それ以外は
  * `'ok_with_warnings'` である。
  */
@@ -284,7 +284,7 @@ export function deriveTopLevelStatus(input: {
 }
 
 /**
- * 変換出力が契約 (3)(5) を満たす点列でない理由。満たすなら `null`。
+ * 変換出力が契約を満たす点列でない理由。満たすなら `null`。
  * 理由は `adapter-contract-failure` の message になる。
  */
 function describePointListViolation(value: unknown, expectedLength: number): string | null {
@@ -528,7 +528,7 @@ const EMPTY_RESULT_SHAPE = {
 /**
  * GCP・候補 CRS・変換 adapter から、決定的な順位と選択結果を返す。
  *
- * 候補は**入力順に逐次**処理し、各返却を `await Promise.resolve(...)` で正規化する（設計 K2）。
+ * 候補は**入力順に逐次**処理し、各返却を `await Promise.resolve(...)` で正規化する。
  * 逐次処理により failure / warning の順序と adapter 呼出し順が決定的になる。
  *
  * `options.signal` で中止されたら `signal.reason`（無ければ `AbortError`）で reject する。
@@ -549,16 +549,16 @@ export async function estimateCrs(
   const isEmptyInput = gcps.length === 0;
   const chirality = options.chirality === 'direct-only' ? 'direct-only' : 'normalize';
 
-  // 非空 L_geo gate（設計 K15）。候補共通の score 分母が成立しない時点で候補 loop を開始しない。
+  // 非空 L_geo gate。候補共通の score 分母が成立しない時点で候補 loop を開始しない。
   // 未呼出しの候補を「変換不能」と記録してはならない ∴ untransformableIds も空で返す。
-  // 空入力だけは 8 項目契約 (4) の機械検証のため候補ごとに transformer を呼ぶ（下の loop へ進む）。
+  // 空入力だけは空入力に null を返す契約の機械検証のため候補ごとに transformer を呼ぶ（下の loop へ進む）。
   const observationScale = computeObservationScale(gcps, sourceBasis);
   if (!isEmptyInput && (!Number.isFinite(observationScale) || observationScale < epsilonMeters)) {
     return { ...EMPTY_RESULT_SHAPE, ranked: [], warnings: [], untransformableIds: [] };
   }
 
   // holdout は GCP とつないで 1 回で変換する（transformer の呼び出しを増やさない）。
-  // 空入力の経路（契約 (4) の検証）では holdout をつながない。
+  // 空入力の経路（null を返す契約の検証）では holdout をつながない。
   const holdout: readonly GcpPair[] = isEmptyInput ? [] : (options.holdout ?? []);
   const geoPoints: ReadonlyArray<readonly [number, number]> = [
     ...gcps.map((gcp) => gcp.geo),
@@ -589,7 +589,7 @@ export async function estimateCrs(
     if (signal?.aborted) throw abortReason(signal);
     const id = `${candidate.authority}:${candidate.code}`;
 
-    // identity 重複は最初の 1 件だけ評価する（設計 K6。failure として同じ id を
+    // identity 重複は最初の 1 件だけ評価する（failure として同じ id を
     // untransformableIds へ入れると採用済み同一 id と交差するため、2 件目以降は無視する）
     if (seenIds.has(id)) continue;
     seenIds.add(id);
@@ -608,20 +608,20 @@ export async function estimateCrs(
       break;
     }
     if (outcome.kind === 'thrown') {
-      // throw / reject は adapter bug（設計 §4.2）
+      // throw / reject は adapter bug
       recordFailure(id, 'adapter-bug', messageOf(outcome.error));
       continue;
     }
     const transformed = outcome.value;
 
     if (transformed === null) {
-      // 業務的変換不能（空入力の契約 (4) を含む）
+      // 業務的変換不能（空入力の場合を含む）
       recordFailure(id, 'business-untransformable');
       continue;
     }
 
     if (isEmptyInput) {
-      // 空入力には null を返す契約 (4)。`[]` を含む配列は契約違反
+      // 空入力には null を返す契約。`[]` を含む配列は契約違反
       recordFailure(id, 'adapter-contract-failure', 'empty input must give null');
       continue;
     }
@@ -727,7 +727,7 @@ export async function estimateCrs(
     };
   }
 
-  // 成功時 warnings は selected 候補の Daedalus FitWarning だけを同順・同形で返す（設計 K9）
+  // 成功時 warnings は selected 候補の Daedalus FitWarning だけを同順・同形で返す
   const warnings = head.fit.warnings;
 
   return {
@@ -740,7 +740,7 @@ export async function estimateCrs(
     }),
     selected: {
       identity: { authority: head.authority, code: head.code },
-      // selected.worldFile / qualityGate は同じ候補に対する Daedalus の最終返却である（設計 K10）
+      // selected.worldFile / qualityGate は同じ候補に対する Daedalus の最終返却である
       // worldFile は pixel → その候補の単位の写像に直す（metre の候補は 1 で割るだけ）
       worldFile: toCandidateUnits(
         head.fit.worldFile as NonNullable<FitResult['worldFile']>,
@@ -748,7 +748,7 @@ export async function estimateCrs(
       ),
       unit: head.unit,
       score: head.score,
-      // selected.rmsMeters は ranking に用いた shear 前 basic RMS である（設計 K10）
+      // selected.rmsMeters は ranking に用いた shear 前 basic RMS である
       rmsMeters: head.basicRmsMeters,
       qualityGate: head.fit.qualityGate as Exclude<QualityGate, 'unusable'>,
     },
