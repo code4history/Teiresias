@@ -95,21 +95,20 @@ export async function loadCandidates(mode) {
 }
 
 /**
- * `CandidateTransformer` を作る（E2E `estimate-crs.real-engine.e2e.test.ts` の
- * `makeTransformer` と**同形**）。
+ * `CandidateTransformer` を作る。生成は Atlas の公開 adapter `createCandidateTransformer` に任せ、
+ * 本ファイルは `@c4h/atlas` の動的 import を待つ包みだけを持つ（E2E
+ * `estimate-crs.real-engine.e2e.test.ts` と同じ adapter を使う）。
  *
- * `geoBasis` gate: この Atlas export は `lonlat_deg` / lon-lat 順の入力専用である ∴
- * 非 lonlat の basis を渡されたら黙って誤変換せず、契約 (4)「業務的変換不能」へ落とす。
+ * - `geoBasis` が `lonlat_deg` / lon-lat 順でなければ `null`、知らない id も `null`
+ *   （契約 (7)「業務的変換不能」）。実装側の失敗は throw で伝わる（契約 (7)）。
+ * - `rows` は呼び出し時に写す（後から `rows` を書き換えても結果は変わらない）。
  */
 export function makeTransformer(rows) {
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  return async (id, points, geoBasis) => {
-    if (geoBasis.kind !== 'lonlat_deg' || geoBasis.axisOrder !== 'lon-lat') return null;
-    const target = byId.get(id);
-    if (target === undefined) return null;
-    const { transformLonLatArrayToProjected } = await loadAtlasRuntime();
-    return transformLonLatArrayToProjected(target, points);
-  };
+  const snapshot = rows.map((row) => ({ id: row.id, proj4: row.proj4 }));
+  const transformerPromise = loadAtlasRuntime().then(({ createCandidateTransformer }) =>
+    createCandidateTransformer(snapshot),
+  );
+  return async (id, points, geoBasis) => (await transformerPromise)(id, points, geoBasis);
 }
 
 /** 真値 `EPSG:6674` へ `GCP_LONLAT` を投影する（pixel 格子の元になる座標）。 */

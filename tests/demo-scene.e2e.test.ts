@@ -22,7 +22,7 @@
  * 依存する browser 専用経路であり、Node では Atlas 側が自前で初期化するためである
  * （`Atlas/src/proj-wasm-crs.ts` の `installProjWasmAssetResolver` は browser 判定で早期 return する）。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { loadCandidates, makeTransformer, projectTruth } from '../demo/atlas-engine.js';
 import {
@@ -34,6 +34,11 @@ import {
   discriminationOf,
   runScene,
 } from '../demo/estimate-scene.js';
+
+// 実 engine の初回のカタログ読み込み（proj.db の展開）は、最初に呼んだテストが払う。
+// 全件を並列に走らせた負荷ありで最大 8,845 ms を測った（3 回）∴ その 2 倍を秒へ切り上げた
+// 18 秒をこのファイルの timeout にする（既定の 5 秒では負荷ありで落ちる）。
+vi.setConfig({ testTimeout: 18_000 });
 
 const geoPoints = GCP_LONLAT.map((point) => [point[0], point[1]] as [number, number]);
 

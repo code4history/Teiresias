@@ -17,16 +17,22 @@
  * （`Atlas/src` / `Teiresias/src` / `Daedalus`）へは置かない（設計 K13。置いた時点で
  * 「反射をどう扱うか」を m2a が決めたことになり、m2b の所有事項を侵す）。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
+  createCandidateTransformer,
   listProjectedCrsFromProjWasm,
   transformLonLatArrayToProjected,
   type ProjectedCrsInfo,
 } from '@c4h/atlas';
 
 import { estimateCrs } from '../src/index.js';
-import type { CandidateCrs, CandidateTransformer, EstimationResult } from '../src/index.js';
+import type { CandidateCrs, EstimationResult } from '../src/index.js';
+
+// 実 engine の初回のカタログ読み込み（proj.db の展開）は、最初に呼んだテストが払う。
+// 全件を並列に走らせた負荷ありで最大 8,845 ms を測った（3 回）∴ その 2 倍を秒へ切り上げた
+// 18 秒をこのファイルの timeout にする（既定の 5 秒では負荷ありで落ちる）。
+vi.setConfig({ testTimeout: 18_000 });
 
 // ---------------------------------------------------------------------------
 // 実カタログ（ハードコードした ProjectedCrsInfo は作らない。カタログ経路を E2E に含める）
@@ -93,21 +99,15 @@ function pickById(rows: readonly ProjectedCrsInfo[], ids: readonly string[]): Pr
   });
 }
 
-/**
- * adapter glue。Teiresias `src` には置かず、テストが注入するだけである（【C7】engine 直参照禁止）。
+/*
+ * adapter glue は Atlas の公開 adapter `createCandidateTransformer` を使う。Teiresias `src` には
+ * 置かず、テストが注入するだけである（【C7】engine 直参照禁止）。
  *
- * `geoBasis` gate: 本 Atlas export は `lonlat_deg` / lon-lat 順の入力専用である（設計 K3）。
- * 非 lonlat の basis を渡されたら黙って誤変換せず、契約 (4)「業務的変換不能」へ落とす。
+ * 挙動: `geoBasis` が `lonlat_deg` / lon-lat 順でなければ `null`（黙って誤変換せず、契約 (7)
+ * 「業務的変換不能」へ落とす）、知らない id は `null`、それ以外は
+ * `transformLonLatArrayToProjected` の結果。実装側の失敗は `null` ではなく throw で伝わる
+ * （契約 (7)「throw は adapter bug のときだけ」）。
  */
-function makeTransformer(rows: readonly ProjectedCrsInfo[]): CandidateTransformer {
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  return (id, points, geoBasis) => {
-    if (geoBasis.kind !== 'lonlat_deg' || geoBasis.axisOrder !== 'lon-lat') return null;
-    const target = byId.get(id);
-    if (target === undefined) return null;
-    return transformLonLatArrayToProjected(target, points);
-  };
-}
 
 // ---------------------------------------------------------------------------
 // GCP セットの構成（設計 §5.3 / K8）
@@ -340,7 +340,7 @@ describe('m2a-t1/AC-6: 実 engine を注入した estimateCrs（反射なしセ�
     const { forward } = await gcpSets();
 
     const result = await estimateCrs(forward, candidates, {
-      transformer: makeTransformer(candidates),
+      transformer: createCandidateTransformer(candidates),
     });
 
     expect(result.untransformableIds).toEqual([]);
@@ -359,10 +359,10 @@ describe('m2a-t1/AC-6: 実 engine を注入した estimateCrs（反射なしセ�
     const { forward } = await gcpSets();
 
     const straight = await estimateCrs(forward, candidates, {
-      transformer: makeTransformer(candidates),
+      transformer: createCandidateTransformer(candidates),
     });
     const reversed = await estimateCrs(forward, [...candidates].reverse(), {
-      transformer: makeTransformer(candidates),
+      transformer: createCandidateTransformer(candidates),
     });
 
     expect(rankedIds(reversed)).toEqual(rankedIds(straight));
@@ -474,7 +474,7 @@ describe('AC-7: 実測固定・正規化なし（direct-only） — 反射が候
     const candidates = pickById(await catalogWide(), REQUIRED_IDS);
     const sets = await gcpSets();
     return estimateCrs(reflectedSet ? sets.reflected : sets.forward, candidates, {
-      transformer: makeTransformer(candidates),
+      transformer: createCandidateTransformer(candidates),
       chirality: 'direct-only',
     });
   }
@@ -543,7 +543,7 @@ describe('AC-7: 実測固定・正規化なし（direct-only） — 反射が候
   it('(d) 既定カタログ 5 件を絞らずに使うと、反射ありで真値が ranked[0] から落ちる', async () => {
     const candidates = await catalogDefault();
     const sets = await gcpSets();
-    const transformer = makeTransformer(candidates);
+    const transformer = createCandidateTransformer(candidates);
 
     const reflectedResult = await estimateCrs(sets.reflected, candidates, { transformer, chirality: 'direct-only' });
     const forwardResult = await estimateCrs(sets.forward, candidates, { transformer, chirality: 'direct-only' });
@@ -638,7 +638,7 @@ describe('AC-13: 実測固定・正規化なし（direct-only） — 符号付�
   it('verdict === reflected と真値候補の basic RMS 劣化が同時に起きる（対応関係）', async () => {
     const candidates = pickById(await catalogWide(), REQUIRED_IDS);
     const sets = await gcpSets();
-    const transformer = makeTransformer(candidates);
+    const transformer = createCandidateTransformer(candidates);
 
     const forwardResult = await estimateCrs(sets.forward, candidates, { transformer, chirality: 'direct-only' });
     const reflectedResult = await estimateCrs(sets.reflected, candidates, { transformer, chirality: 'direct-only' });
@@ -653,7 +653,7 @@ describe('AC-13: 実測固定・正規化なし（direct-only） — 符号付�
   it('判定は ranking へ影響しない（反射ありでも ranked は helper 非依存のまま）', async () => {
     const candidates = pickById(await catalogWide(), REQUIRED_IDS);
     const sets = await gcpSets();
-    const transformer = makeTransformer(candidates);
+    const transformer = createCandidateTransformer(candidates);
     const result = await estimateCrs(sets.reflected, candidates, { transformer, chirality: 'direct-only' });
     expect(result.ranked).toHaveLength(3);
     expect(result.untransformableIds).toEqual([]);
@@ -744,7 +744,7 @@ describe('chirality 正規化（既定）: 実 engine・既定カタログ', () 
     const candidates = await catalogDefault();
     const sets = await gcpSets();
     const result = await estimateCrs(reflectedSet ? sets.reflected : sets.forward, candidates, {
-      transformer: makeTransformer(candidates),
+      transformer: createCandidateTransformer(candidates),
     });
     return { result, klass: await truthClass(candidates) };
   }

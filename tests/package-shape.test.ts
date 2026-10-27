@@ -252,6 +252,8 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
     expect(script).toContain('--noEmit');
     expect(script).toContain('--moduleResolution Bundler');
     expect(script).toContain('tests/api-smoke.test.ts');
+    // Atlas の公開 adapter が Teiresias の CandidateTransformer へ型でつながること
+    expect(script).toContain('tests/atlas-adapter-contract.test.ts');
   });
 
   it('vitest と @vitest/coverage-v8 の major が一致する（outer rule-0018）', () => {
