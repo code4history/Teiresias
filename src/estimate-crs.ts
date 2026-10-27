@@ -13,7 +13,15 @@
 import { fitWorldFile } from '@c4h/daedalus';
 import type { FitResult, FitStatus, FitWarning, GcpPair, GeoBasis, QualityGate } from '@c4h/daedalus';
 
-import type { CandidateCrs, EstimateOptions, EstimationResult } from './types.js';
+import type {
+  CandidateCrs,
+  CandidateFailure,
+  CandidateFailureKind,
+  CandidateTransformer,
+  EstimateOptions,
+  EstimationFailure,
+  EstimationResult,
+} from './types.js';
 
 /** 仕様正本 v0.3 の既定 epsilon（m）。Daedalus の gate と揃える。 */
 const DEFAULT_NORMALIZE_EPSILON_METERS = 100;
@@ -23,6 +31,10 @@ const METRES_PER_DEGREE = 111320;
 const METRES_PER_FOOT = 0.3048;
 /** score 同着の許容係数（設計 K11。機械精度由来の許容だけに限定する）。 */
 const TIE_EPSILON_FACTOR = 64;
+/** transformer の呼び出し 1 回の既定の上限（ms）。 */
+const DEFAULT_TIMEOUT_MS = 120_000;
+/** 失敗の message の上限（文字）。 */
+const FAILURE_MESSAGE_MAX_LENGTH = 500;
 
 /**
  * Daedalus へ渡す basis は常にこれ（設計 K7）。
@@ -37,7 +49,8 @@ const DEFAULT_SOURCE_BASIS: GeoBasis = { kind: 'lonlat_deg', axisOrder: 'lon-lat
 /**
  * candidate 単位の失敗分類（設計 §4.2）。公開しない内部語彙である。
  * `adapter-contract-failure` / `adapter-bug` / `dependency-contract-failure` が
- * 「実装失敗」であり、usable 0 件のとき top-level を `failed` にする（設計 K9 / §5.6）。
+ * 「実装失敗」であり、1 件でもあれば top-level を `failed` にする（公開の `CandidateFailureKind`
+ * はこの 3 つに打ち切り `adapter-timeout` を足したもの）。
  */
 export type CandidateFailureClass =
   | 'business-untransformable'
@@ -45,7 +58,8 @@ export type CandidateFailureClass =
   | 'adapter-bug'
   | 'candidate-input-failure'
   | 'fit-insufficient'
-  | 'dependency-contract-failure';
+  | 'dependency-contract-failure'
+  | 'adapter-timeout';
 
 const IMPLEMENTATION_FAILURE_CLASSES: ReadonlySet<CandidateFailureClass> = new Set([
   'adapter-contract-failure',
@@ -65,6 +79,21 @@ export interface RankableCandidate {
 export function normalizePositiveInteger(value: number | undefined, fallback: number): number {
   if (typeof value !== 'number' || !Number.isFinite(value)) return fallback;
   if (!Number.isInteger(value) || value <= 0) return fallback;
+  return value;
+}
+
+/** `setTimeout` が受けられる遅延の上限（2^31 − 1 ms）。越えると 1 ms へ置き換えられる。 */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
+/**
+ * 正の有限値と `Infinity` だけを受理し、それ以外（0 以下・非数・undefined）は既定 120000 ms へ落とす。
+ * `setTimeout` の上限を越える値は、即座の打ち切りにならないよう `Infinity`（打ち切りなし）として扱う。
+ * 内部 helper の一覧（tests/package-shape.test.ts）を増やさないため export しない。
+ */
+function normalizeTimeoutMs(value: number | undefined): number {
+  if (value === Number.POSITIVE_INFINITY) return value;
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return DEFAULT_TIMEOUT_MS;
+  if (value > MAX_TIMER_DELAY_MS) return Number.POSITIVE_INFINITY;
   return value;
 }
 
@@ -217,11 +246,11 @@ export function rankCandidates<T extends RankableCandidate>(
 }
 
 /**
- * 成功時の status 導出（設計 §5.6 の行 1・2。K14）。
+ * 成功時の status 導出。
  *
- * 現行の Teiresias `EstimateOptions` は Daedalus の `FitOptions.holdout` を公開せず、実 Daedalus の
- * 成功 fit は必ず warning を 1 件以上持つ ∴ 公開 API から `'ok'` は到達不能である。
- * `FitStatus` 互換と将来の holdout 対応のため分岐を保持し、合成 warning 配列で単体検証する。
+ * 実 Daedalus の成功 fit は、holdout を渡して affine が採用されたとき（Daedalus の行 8）だけ
+ * warning が 0 件になる ∴ 公開 API で `'ok'` になるのはその場合だけで、それ以外は
+ * `'ok_with_warnings'` である。
  */
 export function deriveSuccessStatus(
   warnings: readonly FitWarning[],
@@ -229,31 +258,119 @@ export function deriveSuccessStatus(
   return warnings.length === 0 ? 'ok' : 'ok_with_warnings';
 }
 
-/** top-level status 導出（設計 §5.6 の 4 行全数）。重なりでは `failed` を優先する。 */
+/**
+ * top-level status 導出。上から評価し、最初に当たった行で決まる。
+ *
+ * 1. 打ち切り（`adapter-timeout`）が起きた → `failed`
+ * 2. 実装失敗が 1 件以上 → `failed`（usable が残っていても。その候補が真値だったか判断できない）
+ * 3. usable ≥ `minCandidates` → `ok` / `ok_with_warnings`
+ * 4. それ以外 → `insufficient`
+ */
 export function deriveTopLevelStatus(input: {
   usableCount: number;
   minCandidates: number;
   hasImplementationFailure: boolean;
+  hasTimeout: boolean;
   selectedWarnings: readonly FitWarning[];
 }): FitStatus {
+  if (input.hasTimeout) return 'failed';
+  if (input.hasImplementationFailure) return 'failed';
   if (input.usableCount >= input.minCandidates) {
     return deriveSuccessStatus(input.selectedWarnings);
-  }
-  if (input.usableCount === 0 && input.hasImplementationFailure) {
-    return 'failed';
   }
   return 'insufficient';
 }
 
-/** 変換出力が契約 (3)(5) を満たす点列であるか。 */
-function isConformingPointList(value: unknown, expectedLength: number): value is Array<[number, number]> {
-  if (!Array.isArray(value)) return false;
-  if (value.length !== expectedLength) return false;
-  for (const point of value) {
-    if (!Array.isArray(point) || point.length < 2) return false;
-    if (!Number.isFinite(point[0]) || !Number.isFinite(point[1])) return false;
+/**
+ * 変換出力が契約 (3)(5) を満たす点列でない理由。満たすなら `null`。
+ * 理由は `adapter-contract-failure` の message になる。
+ */
+function describePointListViolation(value: unknown, expectedLength: number): string | null {
+  if (!Array.isArray(value)) return 'not an array';
+  if (value.length !== expectedLength) return `expected ${expectedLength} points, got ${value.length}`;
+  for (let index = 0; index < value.length; index++) {
+    const point: unknown = value[index];
+    if (!Array.isArray(point) || point.length < 2 || !Number.isFinite(point[0]) || !Number.isFinite(point[1])) {
+      return `point ${index} is not a pair of finite numbers`;
+    }
   }
-  return true;
+  return null;
+}
+
+/** throw / reject された値を message にする（500 文字で切る）。 */
+function messageOf(error: unknown): string {
+  return truncateMessage(error instanceof Error ? error.message : String(error));
+}
+
+function truncateMessage(message: string): string {
+  return message.length > FAILURE_MESSAGE_MAX_LENGTH ? message.slice(0, FAILURE_MESSAGE_MAX_LENGTH) : message;
+}
+
+/** 中止の理由（`signal.reason` が無ければ `AbortError` の `DOMException`）。 */
+function abortReason(signal: AbortSignal): unknown {
+  return signal.reason ?? new DOMException('The operation was aborted.', 'AbortError');
+}
+
+/** transformer の呼び出し 1 回の帰結。中止は reject で伝える。 */
+type TransformerOutcome =
+  | { kind: 'value'; value: unknown }
+  | { kind: 'thrown'; error: unknown }
+  | { kind: 'timeout' };
+
+/**
+ * transformer を 1 回呼び、`timeoutMs` のタイマーと `signal` の abort と競わせる。
+ *
+ * 負けた呼び出しの promise は取り消せないので捨てる（後から解決・reject しても結果に影響しない）。
+ * タイマーと abort の listener は必ず外す。
+ */
+async function invokeTransformer(
+  transformer: CandidateTransformer,
+  args: Parameters<CandidateTransformer>,
+  timeoutMs: number,
+  signal: AbortSignal | undefined,
+): Promise<TransformerOutcome> {
+  let call: Promise<unknown>;
+  try {
+    call = Promise.resolve(transformer(...args));
+  } catch (error) {
+    return { kind: 'thrown', error };
+  }
+  // 同期の transformer の中で中止された場合も、次へ進まずに reject する。
+  // 捨てる promise が後で reject しても未処理にならないよう、先に handler を付けておく
+  if (signal?.aborted) {
+    call.catch(() => {});
+    throw abortReason(signal);
+  }
+
+  const contenders: Array<Promise<TransformerOutcome>> = [
+    call.then(
+      (value): TransformerOutcome => ({ kind: 'value', value }),
+      (error: unknown): TransformerOutcome => ({ kind: 'thrown', error }),
+    ),
+  ];
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  if (Number.isFinite(timeoutMs)) {
+    contenders.push(
+      new Promise<TransformerOutcome>((resolve) => {
+        timer = setTimeout(() => resolve({ kind: 'timeout' }), timeoutMs);
+      }),
+    );
+  }
+  let onAbort: (() => void) | undefined;
+  if (signal !== undefined) {
+    contenders.push(
+      new Promise<TransformerOutcome>((_resolve, reject) => {
+        onAbort = () => reject(abortReason(signal));
+        signal.addEventListener('abort', onAbort, { once: true });
+      }),
+    );
+  }
+  try {
+    return await Promise.race(contenders);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (onAbort !== undefined) signal?.removeEventListener('abort', onAbort);
+  }
 }
 
 interface UsableCandidate extends RankableCandidate {
@@ -267,11 +384,16 @@ type FitEvaluation =
   | { kind: 'fit-insufficient' | 'dependency-contract-failure'; fit: FitResult };
 
 /** Daedalus で fit し、ranking に使えるか・失敗の分類を決める。 */
-function evaluateFit(gcps: readonly GcpPair[], epsilonMeters: number): FitEvaluation {
+function evaluateFit(
+  gcps: readonly GcpPair[],
+  holdout: readonly GcpPair[],
+  epsilonMeters: number,
+): FitEvaluation {
   const fit = fitWorldFile(gcps, {
     geoBasis: DAEDALUS_TARGET_BASIS,
     normalizeEpsilonMeters: epsilonMeters,
     debug: true,
+    ...(holdout.length > 0 ? { holdout } : {}),
   });
 
   const succeeded = fit.status === 'ok' || fit.status === 'ok_with_warnings';
@@ -335,6 +457,7 @@ const EMPTY_RESULT_SHAPE = {
   ranked: [] as EstimationResult['ranked'],
   warnings: [] as readonly FitWarning[],
   untransformableIds: [] as string[],
+  failure: null,
 };
 
 /**
@@ -342,13 +465,20 @@ const EMPTY_RESULT_SHAPE = {
  *
  * 候補は**入力順に逐次**処理し、各返却を `await Promise.resolve(...)` で正規化する（設計 K2）。
  * 逐次処理により failure / warning の順序と adapter 呼出し順が決定的になる。
+ *
+ * `options.signal` で中止されたら `signal.reason`（無ければ `AbortError`）で reject する。
+ * それ以外の失敗は reject ではなく `status: 'failed'` と `failure` で返す。
  */
 export async function estimateCrs(
   gcps: readonly GcpPair[],
   candidates: readonly CandidateCrs[],
   options: EstimateOptions,
 ): Promise<EstimationResult> {
+  const signal = options.signal;
+  if (signal?.aborted) throw abortReason(signal);
+
   const sourceBasis = options.geoBasis ?? DEFAULT_SOURCE_BASIS;
+  const timeoutMs = normalizeTimeoutMs(options.timeoutMs);
   const epsilonMeters = normalizeEpsilonMeters(options.normalizeEpsilonMeters);
   const minCandidates = normalizePositiveInteger(options.minCandidates, 1);
   const isEmptyInput = gcps.length === 0;
@@ -362,20 +492,36 @@ export async function estimateCrs(
     return { ...EMPTY_RESULT_SHAPE, ranked: [], warnings: [], untransformableIds: [] };
   }
 
-  const geoPoints: ReadonlyArray<readonly [number, number]> = gcps.map((gcp) => gcp.geo);
+  // holdout は GCP とつないで 1 回で変換する（transformer の呼び出しを増やさない）。
+  // 空入力の経路（契約 (4) の検証）では holdout をつながない。
+  const holdout: readonly GcpPair[] = isEmptyInput ? [] : (options.holdout ?? []);
+  const geoPoints: ReadonlyArray<readonly [number, number]> = [
+    ...gcps.map((gcp) => gcp.geo),
+    ...holdout.map((pair) => pair.geo),
+  ];
 
   const untransformableIds: string[] = [];
+  const untransformableIdSet = new Set<string>();
   const seenIds = new Set<string>();
-  const failureClasses: CandidateFailureClass[] = [];
+  const failures: CandidateFailure[] = [];
   const fitReachedWarnings: FitWarning[] = [];
   const usable: UsableCandidate[] = [];
+  let timedOut = false;
 
-  const recordFailure = (id: string, failureClass: CandidateFailureClass): void => {
-    failureClasses.push(failureClass);
-    if (!untransformableIds.includes(id)) untransformableIds.push(id);
+  const markUntransformable = (id: string): void => {
+    if (untransformableIdSet.has(id)) return;
+    untransformableIdSet.add(id);
+    untransformableIds.push(id);
+  };
+  const recordFailure = (id: string, failureClass: CandidateFailureClass, message?: string): void => {
+    if (IMPLEMENTATION_FAILURE_CLASSES.has(failureClass) || failureClass === 'adapter-timeout') {
+      failures.push({ id, kind: failureClass as CandidateFailureKind, message: truncateMessage(message ?? '') });
+    }
+    markUntransformable(id);
   };
 
   for (const candidate of candidates) {
+    if (signal?.aborted) throw abortReason(signal);
     const id = `${candidate.authority}:${candidate.code}`;
 
     // identity 重複は最初の 1 件だけ評価する（設計 K6。failure として同じ id を
@@ -389,14 +535,19 @@ export async function estimateCrs(
       continue;
     }
 
-    let transformed: Array<[number, number]> | null;
-    try {
-      transformed = await Promise.resolve(options.transformer(id, geoPoints, sourceBasis));
-    } catch {
+    const outcome = await invokeTransformer(options.transformer, [id, geoPoints, sourceBasis], timeoutMs, signal);
+    if (outcome.kind === 'timeout') {
+      // その場で推定を止める（止まった呼び出しが資源を握っていると、残りも上限まで待つことになる）
+      recordFailure(id, 'adapter-timeout', `no answer within ${timeoutMs} ms`);
+      timedOut = true;
+      break;
+    }
+    if (outcome.kind === 'thrown') {
       // throw / reject は adapter bug（設計 §4.2）
-      recordFailure(id, 'adapter-bug');
+      recordFailure(id, 'adapter-bug', messageOf(outcome.error));
       continue;
     }
+    const transformed = outcome.value;
 
     if (transformed === null) {
       // 業務的変換不能（空入力の契約 (4) を含む）
@@ -404,34 +555,53 @@ export async function estimateCrs(
       continue;
     }
 
-    if (!isConformingPointList(transformed, geoPoints.length)) {
-      // 非配列・長さ不一致・非有限出力は adapter contract failure
-      recordFailure(id, 'adapter-contract-failure');
+    if (isEmptyInput) {
+      // 空入力には null を返す契約 (4)。`[]` を含む配列は契約違反
+      recordFailure(id, 'adapter-contract-failure', 'empty input must give null');
       continue;
     }
 
+    const violation = describePointListViolation(transformed, geoPoints.length);
+    if (violation !== null) {
+      // 非配列・長さ不一致・非有限出力は adapter contract failure
+      recordFailure(id, 'adapter-contract-failure', violation);
+      continue;
+    }
+    const points = transformed as Array<[number, number]>;
+    const gcpPoints = points.slice(0, gcps.length);
+
     const transformedGcps: GcpPair[] = gcps.map((gcp, index) => ({
       pixel: gcp.pixel,
-      geo: transformed[index],
+      geo: points[index],
+    }));
+    const transformedHoldout: GcpPair[] = holdout.map((pair, index) => ({
+      pixel: pair.pixel,
+      geo: points[gcps.length + index],
     }));
 
-    const direct = evaluateFit(transformedGcps, epsilonMeters);
+    const direct = evaluateFit(transformedGcps, transformedHoldout, epsilonMeters);
     let chosen = direct;
     if (chirality === 'normalize') {
-      // 反射の吸収: pixel の v を反転した入力も当てる（geo 側は同じ。transformer は呼び直さない）
-      const flippedGcps: GcpPair[] = transformedGcps.map((gcp) => ({
-        pixel: [gcp.pixel[0], -gcp.pixel[1]],
-        geo: gcp.geo,
-      }));
-      const flip = evaluateFit(flippedGcps, epsilonMeters);
-      if (prefersFlip(direct, flip, transformed)) chosen = unflipFit(flip);
+      // 反射の吸収: pixel の v を反転した入力も当てる（geo 側は同じ。transformer は呼び直さない）。
+      // holdout の pixel も同じく反転する
+      const flipPixel = (pair: GcpPair): GcpPair => ({ pixel: [pair.pixel[0], -pair.pixel[1]], geo: pair.geo });
+      const flip = evaluateFit(transformedGcps.map(flipPixel), transformedHoldout.map(flipPixel), epsilonMeters);
+      if (prefersFlip(direct, flip, gcpPoints)) chosen = unflipFit(flip);
     }
 
     // 採らなかった側の warning は外へ出さない
     fitReachedWarnings.push(...chosen.fit.warnings);
 
+    if (chosen.kind === 'dependency-contract-failure') {
+      // Daedalus の返却が公開契約と食い違う（untransformableIds へは入れない。変換はできている）
+      failures.push({
+        id,
+        kind: 'dependency-contract-failure',
+        message: 'the fit result violates the public contract of @c4h/daedalus',
+      });
+      continue;
+    }
     if (chosen.kind !== 'usable') {
-      failureClasses.push(chosen.kind);
       continue;
     }
     const { fit, basicRmsMeters } = chosen;
@@ -461,25 +631,31 @@ export async function estimateCrs(
     rmsMeters: entry.basicRmsMeters,
   }));
 
-  const hasImplementationFailure = failureClasses.some((failureClass) =>
-    IMPLEMENTATION_FAILURE_CLASSES.has(failureClass),
-  );
+  const hasTimeout = timedOut;
+  const hasImplementationFailure = failures.some((entry) => entry.kind !== 'adapter-timeout');
+  const failure: EstimationFailure | null =
+    hasTimeout || hasImplementationFailure
+      ? { reason: hasTimeout ? 'timeout' : 'implementation-failure', candidates: failures }
+      : null;
 
-  const head = usable.length >= minCandidates ? rankedAll[0] : undefined;
+  const head = failure === null && usable.length >= minCandidates ? rankedAll[0] : undefined;
   if (head === undefined) {
     return {
       status: deriveTopLevelStatus({
         usableCount: usable.length,
         minCandidates,
         hasImplementationFailure,
+        hasTimeout,
         selectedWarnings: [],
       }),
       selected: null,
+      // failed のときは評価できた候補だけの不完全な順位（診断。選択に使ってはならない）
       ranked,
       // selected が無い場合は fit に到達した候補の warning を入力順で返す
       // （{code,detail} 完全一致の重複だけ除く）
       warnings: dedupeWarnings(fitReachedWarnings),
       untransformableIds,
+      failure,
     };
   }
 
@@ -491,6 +667,7 @@ export async function estimateCrs(
       usableCount: usable.length,
       minCandidates,
       hasImplementationFailure,
+      hasTimeout,
       selectedWarnings: warnings,
     }),
     selected: {
@@ -505,6 +682,7 @@ export async function estimateCrs(
     ranked,
     warnings,
     untransformableIds,
+    failure: null,
   };
 }
 
@@ -513,7 +691,7 @@ function dedupeWarnings(warnings: readonly FitWarning[]): FitWarning[] {
   const seen = new Set<string>();
   const result: FitWarning[] = [];
   for (const warning of warnings) {
-    const key = `${warning.code} ${warning.detail ?? ''}`;
+    const key = JSON.stringify([warning.code, warning.detail ?? null]);
     if (seen.has(key)) continue;
     seen.add(key);
     result.push(warning);

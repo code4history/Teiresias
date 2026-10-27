@@ -18,7 +18,14 @@ types are exposed; the internal helpers (ranking / status derivation) are not.
 
 ```ts
 import { estimateCrs } from '@c4h/teiresias';
-import type { CandidateCrs, EstimateOptions, EstimationResult } from '@c4h/teiresias';
+import type {
+  CandidateCrs,
+  CandidateFailure,
+  CandidateFailureKind,
+  EstimateOptions,
+  EstimationFailure,
+  EstimationResult,
+} from '@c4h/teiresias';
 
 const result: EstimationResult = await estimateCrs(gcps, candidates, {
   transformer,                 // required. The adapter that transforms into a candidate CRS
@@ -28,8 +35,33 @@ const result: EstimationResult = await estimateCrs(gcps, candidates, {
   normalizeEpsilonMeters,      // defaults to 100 (m)
   datumFamilyPrior,            // defaults to neutral (no prior)
   chirality,                   // defaults to 'normalize'. 'direct-only' does not absorb a reflection
+  holdout,                     // defaults to none. GCPs used only to validate the affine adoption
+  timeoutMs,                   // defaults to 120000 (ms) per transformer call. Infinity disables it
+  signal,                      // defaults to none. An AbortSignal that cancels the whole estimate
 });
 ```
+
+- `holdout` (`readonly GcpPair[]`, `geo` in the order of `geoBasis`) is passed to the holdout
+  validation of Daedalus. It is not used for fitting. The transformer is still called once per
+  candidate: the geo points of the GCPs and of the holdout are transformed together in one call. An
+  empty array is the same as leaving it out.
+- `timeoutMs` is the upper limit of **one transformer call** for one candidate. When a call does not
+  answer within it, the estimate stops there and returns `status: 'failed'` with
+  `failure.reason: 'timeout'`; the remaining candidates are not called. A value that is not a positive
+  number falls back to the default. A value larger than 2147483647 (the largest delay `setTimeout`
+  accepts) is treated as `Infinity`, that is, no limit. It bounds a transformer that returns a Promise
+  and keeps it pending; a transformer that blocks the thread synchronously cannot be interrupted.
+- `signal`: when it is aborted, `estimateCrs` rejects with `signal.reason` (or an `AbortError`
+  `DOMException` when there is no reason), following the convention of Web APIs that take an
+  `AbortSignal`. No further candidate is called. Cancellation is the only case in which
+  `estimateCrs` rejects.
+- `failure` (`EstimationFailure | null`) on the result tells why the status is `failed`:
+  `reason` is `'implementation-failure'` or `'timeout'`, and `candidates` lists each failed candidate
+  (`CandidateFailure`: `id`, `kind`, `message`) in candidate input order. `CandidateFailureKind` is
+  `'adapter-bug'` (the transformer threw or rejected), `'adapter-contract-failure'` (the output breaks
+  the contract: a wrong length, a non-finite point, an array for empty input, and so on),
+  `'dependency-contract-failure'` (the Daedalus result breaks its public contract) or
+  `'adapter-timeout'`. `message` is cut at 500 characters. `failure` is `null` for any other status.
 
 `WorldFile` / `GcpPair` / `GeoBasis` / `FitStatus` / `QualityGate` / `FitWarning` / `MaybePromise`
 are re-exports of the public types of `@c4h/daedalus`; Teiresias does not redefine them.
@@ -98,9 +130,9 @@ The transformer gives `null` for a `geoBasis` other than `{ kind: 'lonlat_deg', 
 and for an id that is not among the rows, which is contract (7) "untransformable in the domain sense".
 A failure on the Atlas side is thrown, not turned into `null`. Teiresias catches a throw or a reject
 per candidate: it records that candidate as an adapter bug, puts its id in `untransformableIds` and
-goes on with the remaining candidates, so `estimateCrs` itself does not reject. When no candidate is
-usable and at least one of them failed this way, the status is `failed` (see "Status and
-diagnostics" below). The real-engine E2E (`tests/estimate-crs.real-engine.e2e.test.ts`)
+goes on with the remaining candidates, so `estimateCrs` itself does not reject. If even one candidate
+failed this way, the status is `failed` and `selected` is `null`, even when other candidates are usable,
+and `failure` names the failed candidates (see "Status and diagnostics" below). The real-engine E2E (`tests/estimate-crs.real-engine.e2e.test.ts`)
 and the demo (`demo/atlas-engine.js`) are wired this way.
 
 ## Ranking and score
@@ -145,15 +177,26 @@ worldFile. There is no API that exposes the final RMS under a different name.
 
 ## Status and diagnostics
 
-| condition | `status` | `selected` |
-|---|---|---|
-| usable count >= `minCandidates`, and the selected candidate has 0 warnings | `ok` | the leading candidate |
-| usable count >= `minCandidates`, and the selected candidate has 1 or more warnings | `ok_with_warnings` | the leading candidate |
-| usable count < `minCandidates` | `insufficient` | `null` |
-| 0 usable candidates and 1 or more adapter contract failures / adapter bugs / dependency contract failures | `failed` | `null` |
+The conditions are evaluated from the top, and the first matching row decides the result.
 
-When the last two conditions overlap, `failed` takes precedence so that an implementation failure is not
-buried under a shortage of candidates.
+| condition | `status` | `selected` | `failure` |
+|---|---|---|---|
+| a transformer call timed out (`adapter-timeout`) | `failed` | `null` | `{ reason: 'timeout', candidates }` (the timed-out candidate comes last) |
+| 1 or more adapter bugs / adapter contract failures / dependency contract failures | `failed` | `null` | `{ reason: 'implementation-failure', candidates }` (all of them) |
+| usable count >= `minCandidates`, and the selected candidate has 0 warnings | `ok` | the leading candidate | `null` |
+| usable count >= `minCandidates`, and the selected candidate has 1 or more warnings | `ok_with_warnings` | the leading candidate | `null` |
+| otherwise (usable count < `minCandidates`) | `insufficient` | `null` | `null` |
+
+An implementation-side failure makes the estimate `failed` even when other candidates are usable:
+Teiresias cannot tell whether the failed candidate was the true CRS, so selecting among the rest could
+silently pick a wrong one. The evaluation still goes on to the last candidate (except after a timeout),
+so `failure.candidates` lists every candidate to fix at once.
+
+- With `status: 'failed'`, `ranked` holds only the candidates that could be evaluated. It is an
+  incomplete ranking for diagnosis and must not be used to select a candidate.
+- `status: 'ok'` happens only when `holdout` is given and Daedalus adopts the affine model; any other
+  successful fit carries at least one warning (for example `validationSkipped`), so it is
+  `ok_with_warnings`.
 
 - On success, `warnings` returns **only the Daedalus `FitWarning`s of the selected candidate**, in the
   same order and the same shape. The warnings of losing candidates are not mixed in without an identity.
@@ -169,8 +212,8 @@ buried under a shortage of candidates.
 `EstimationResult` is a **diagnostic return**. What may be persisted after the Editor has explicitly
 adopted it is **only the selected identity and the adopted worldFile**.
 
-`ranked` / `score` / the basic RMS / `qualityGate` / `warnings` / `untransformableIds` and the whole
-`selected` object are not persisted. The same applies to a return with `qualityGate: 'preview'`: the
+`ranked` / `score` / the basic RMS / `qualityGate` / `warnings` / `untransformableIds` / `failure` and
+the whole `selected` object are not persisted. The same applies to a return with `qualityGate: 'preview'`: the
 decision to persist or adopt is the responsibility of the Editor, not of the library.
 
 ## Known limitations
@@ -190,10 +233,10 @@ decision to persist or adopt is the responsibility of the Editor, not of the lib
 - **The real-engine E2E is connected**: `tests/estimate-crs.real-engine.e2e.test.ts` injects the real CRS
   engine (Atlas / proj-wasm). The mock E2E (`estimate-crs.e2e.test.ts`) coexists with it as a
   deterministic verification of the contract.
-- **`status: 'ok'` is unreachable from the current public API**: since `EstimateOptions` does not expose
-  the `holdout` of Daedalus, a successful fit of the real Daedalus always has at least one warning. The
-  branch is kept for `FitStatus` compatibility and for future holdout support, and it is covered by unit
-  verification of the internal helper.
+- **`timeoutMs` only bounds asynchronous waiting**: a transformer that blocks the JavaScript thread
+  synchronously cannot be interrupted, because the timer cannot fire. The transformer of Atlas
+  (`createCandidateTransformer`) returns a Promise, so the limit applies to its asynchronous waits (such
+  as the initialization of the engine), but not to the synchronous transformation work inside it.
 - **Units**: the transformer output of a successful candidate is fixed to metres. Handling of feet /
   native units is not supported.
 - **Equivalent candidates**: a catalog can contain CRSs whose identifiers differ but whose projection
@@ -202,9 +245,8 @@ decision to persist or adopt is the responsibility of the Editor, not of the lib
   that returns such groups of equivalent candidates; compare the candidates' `proj4` to recognize them
   (tracked in [#4](https://github.com/code4history/Teiresias/issues/4)).
 - **Not supported**: geodesic RMS through the inverse transformation, the antimeridian, polar regions,
-  epoch / grid provenance, robust / weight / LOO / bootstrap, progress callbacks, parallel candidate
-  processing, and cancellation. Cancellation is planned for the first npm release; the others are
-  tracked in [#5](https://github.com/code4history/Teiresias/issues/5).
+  epoch / grid provenance, robust / weight / LOO / bootstrap, progress callbacks, and parallel candidate
+  processing. They are tracked in [#5](https://github.com/code4history/Teiresias/issues/5).
 - **No CLI**: Teiresias is a library only. There is no command-line interface.
 - **Distribution**: this package is not published to npm yet (`private: true`). `@c4h/daedalus` is
   resolved through the local sibling `link:../Daedalus`.

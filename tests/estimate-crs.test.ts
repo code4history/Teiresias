@@ -10,7 +10,7 @@
  *   内部 helper を直接 import して単体検証する（設計 K14 / INF-5。package root へは公開しない）。
  */
 import { fitWorldFile } from '@c4h/daedalus';
-import { describe, expect, it } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 
 import { estimateCrs } from '../src/index.js';
 import {
@@ -54,6 +54,7 @@ import type {
   CandidateCrs,
   CandidateTransformer,
   EstimationResult,
+  FitWarning,
   GcpPair,
   GeoBasis,
 } from '../src/index.js';
@@ -260,6 +261,8 @@ function assertInvariants(result: EstimationResult, inputs: readonly CandidateCr
   // 7
   expect(new Set(result.untransformableIds).size).toBe(result.untransformableIds.length);
   for (const id of result.untransformableIds) expect(rankedIds).not.toContain(id);
+  // 10: failure は failed のときだけ非 null（理由の無い failed・理由つきの成功を作らない）
+  expect(result.failure !== null).toBe(result.status === 'failed');
   // 9: FitWarning は Daedalus 型のまま（code は WarningCode の 7 値）
   for (const warning of result.warnings) {
     expect(FROZEN_WARNING_CODES).toContain(warning.code);
@@ -304,6 +307,11 @@ describe('AC-m1-3: candidate 単位の失敗隔離と全失敗時の status', ()
     expect(result.status).toBe('failed');
     expect(result.selected).toBeNull();
     expect(result.untransformableIds).toEqual(['MOCK:PLANE-A', 'MOCK:PLANE-B']);
+    expect(result.failure?.reason).toBe('implementation-failure');
+    expect(result.failure?.candidates.map((c) => [c.id, c.kind])).toEqual([
+      ['MOCK:PLANE-A', 'adapter-contract-failure'],
+      ['MOCK:PLANE-B', 'adapter-contract-failure'],
+    ]);
     assertInvariants(result, [planeA, planeB]);
   });
 
@@ -325,6 +333,11 @@ describe('AC-m1-3: candidate 単位の失敗隔離と全失敗時の status', ()
     });
     expect(rejected.status).toBe('failed');
     expect(rejected.untransformableIds).toEqual(['MOCK:PLANE-A', 'MOCK:PLANE-B']);
+    expect(thrown.failure?.candidates.map((c) => c.kind)).toEqual(['adapter-bug', 'adapter-bug']);
+    expect(rejected.failure?.candidates).toEqual([
+      { id: 'MOCK:PLANE-A', kind: 'adapter-bug', message: 'mock adapter bug: rejectingMockTransformer always rejects' },
+      { id: 'MOCK:PLANE-B', kind: 'adapter-bug', message: 'mock adapter bug: rejectingMockTransformer always rejects' },
+    ]);
   });
 
   it('業務的 null だけなら insufficient（failed にしない）', async () => {
@@ -338,17 +351,24 @@ describe('AC-m1-3: candidate 単位の失敗隔離と全失敗時の status', ()
     );
     expect(result.status).toBe('insufficient');
     expect(result.untransformableIds).toEqual(['MOCK:NO-SUCH', 'MOCK:NO-SUCH-2']);
+    expect(result.failure).toBeNull();
   });
 
-  it('throw する候補があっても残候補は評価され、成功候補が selected になる', async () => {
+  it('throw する候補が 1 件でもあれば、残候補を評価したうえで failed にし selected を出さない', async () => {
     const transformer: CandidateTransformer = (id, points, geoBasis) => {
       if (id === 'MOCK:PLANE-B') throw new Error('boom');
       return mockTransformer(id, points, geoBasis);
     };
     const result = await estimateCrs(teiresiasE2eGcps, [planeB, planeA], { transformer });
     expect(result.untransformableIds).toEqual(['MOCK:PLANE-B']);
-    expect(result.selected?.identity.code).toBe('PLANE-A');
-    expect(result.status).toBe('ok_with_warnings');
+    expect(result.status).toBe('failed');
+    expect(result.selected).toBeNull();
+    expect(result.failure).toEqual({
+      reason: 'implementation-failure',
+      candidates: [{ id: 'MOCK:PLANE-B', kind: 'adapter-bug', message: 'boom' }],
+    });
+    // ranked は評価できた候補の診断として残る
+    expect(result.ranked.map((entry) => `${entry.authority}:${entry.code}`)).toEqual(['MOCK:PLANE-A']);
     assertInvariants(result, [planeB, planeA]);
   });
 
@@ -392,6 +412,7 @@ describe('AC-INV: 非空 L_geo gate（K15）', () => {
       ranked: [],
       warnings: [],
       untransformableIds: [],
+      failure: null,
     });
   });
 
@@ -538,28 +559,38 @@ describe('内部 helper の単体検証（公開 API から到達不能な分岐
     ).toBe('ok_with_warnings');
   });
 
-  it('deriveTopLevelStatus: 設計 §5.6 の 4 行を全数再現し、重なりでは failed を優先する', () => {
-    expect(
-      deriveTopLevelStatus({ usableCount: 2, minCandidates: 1, hasImplementationFailure: false, selectedWarnings: [] }),
-    ).toBe('ok');
-    expect(
-      deriveTopLevelStatus({
-        usableCount: 2,
-        minCandidates: 1,
-        hasImplementationFailure: false,
-        selectedWarnings: [{ code: 'validationSkipped' }],
-      }),
-    ).toBe('ok_with_warnings');
-    expect(
-      deriveTopLevelStatus({ usableCount: 1, minCandidates: 3, hasImplementationFailure: false, selectedWarnings: [] }),
-    ).toBe('insufficient');
-    expect(
-      deriveTopLevelStatus({ usableCount: 0, minCandidates: 1, hasImplementationFailure: true, selectedWarnings: [] }),
-    ).toBe('failed');
-    // 実装失敗があっても usable が 1 件以上あれば data 量の gate（insufficient）
-    expect(
-      deriveTopLevelStatus({ usableCount: 1, minCandidates: 2, hasImplementationFailure: true, selectedWarnings: [] }),
-    ).toBe('insufficient');
+  it('deriveTopLevelStatus: 4 行（打ち切り → 実装失敗 → usable 十分 → 不足）と重なりを全数再現する', () => {
+    const base = {
+      usableCount: 2,
+      minCandidates: 1,
+      hasImplementationFailure: false,
+      hasTimeout: false,
+      selectedWarnings: [] as FitWarning[],
+    };
+    // 行 3: usable 十分（warning 0 件なら ok）
+    expect(deriveTopLevelStatus(base)).toBe('ok');
+    expect(deriveTopLevelStatus({ ...base, selectedWarnings: [{ code: 'validationSkipped' }] })).toBe(
+      'ok_with_warnings',
+    );
+    // 行 4: 不足
+    expect(deriveTopLevelStatus({ ...base, usableCount: 1, minCandidates: 3 })).toBe('insufficient');
+    expect(deriveTopLevelStatus({ ...base, usableCount: 0 })).toBe('insufficient');
+    // 行 2: 実装失敗が 1 件でもあれば、usable の数によらず failed
+    for (const usableCount of [0, 1, 2]) {
+      for (const minCandidates of [1, 2, 3]) {
+        expect(
+          deriveTopLevelStatus({ ...base, usableCount, minCandidates, hasImplementationFailure: true }),
+        ).toBe('failed');
+      }
+    }
+    // 行 1: 打ち切り（実装失敗との重なりを含む）
+    for (const hasImplementationFailure of [false, true]) {
+      for (const usableCount of [0, 2]) {
+        expect(deriveTopLevelStatus({ ...base, usableCount, hasImplementationFailure, hasTimeout: true })).toBe(
+          'failed',
+        );
+      }
+    }
   });
 
   it('areScoresTied: 機械精度由来の許容だけを同着とする', () => {
@@ -786,5 +817,483 @@ describe('chirality 正規化: 候補ごとの双試行（unit）', () => {
     expect(normalized.selected?.qualityGate).toBe(flipped.selected?.qualityGate);
     expect(normalized.warnings).toEqual(flipped.warnings);
     expect(normalized.status).toBe(flipped.status);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 実装側の失敗を握らない（1 件でも failed・selected なし・理由は failure）
+// ---------------------------------------------------------------------------
+
+/** 候補 PLANE-B だけ inner に差し替え、PLANE-A は適合 mock のままにする transformer。 */
+function planeBVia(inner: CandidateTransformer): CandidateTransformer {
+  return (id, points, geoBasis) =>
+    id === 'MOCK:PLANE-B' ? inner(id, points, geoBasis) : mockTransformer(id, points, geoBasis);
+}
+
+describe('実装側の失敗が 1 件でもあれば failed にする', () => {
+  it('(a) throw と成功が混ざると failed・selected なし・failure に throw の候補・ranked に成功候補', async () => {
+    const transformer = planeBVia(() => {
+      throw new Error('boom');
+    });
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], { transformer });
+    expect(result.status).toBe('failed');
+    expect(result.selected).toBeNull();
+    expect(result.failure).toEqual({
+      reason: 'implementation-failure',
+      candidates: [{ id: 'MOCK:PLANE-B', kind: 'adapter-bug', message: 'boom' }],
+    });
+    expect(result.ranked.map((entry) => entry.code)).toEqual(['PLANE-A']);
+    assertInvariants(result, [planeA, planeB]);
+  });
+
+  it('(b) reject でも同じ', async () => {
+    const transformer = planeBVia(() => Promise.reject(new Error('boom')));
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], { transformer });
+    expect(result.status).toBe('failed');
+    expect(result.selected).toBeNull();
+    expect(result.failure).toEqual({
+      reason: 'implementation-failure',
+      candidates: [{ id: 'MOCK:PLANE-B', kind: 'adapter-bug', message: 'boom' }],
+    });
+    expect(result.ranked.map((entry) => entry.code)).toEqual(['PLANE-A']);
+  });
+
+  it('(c) 長さ不一致は adapter-contract-failure で、message に期待した点数と実際の点数', async () => {
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
+      transformer: planeBVia(brokenLengthMockTransformer),
+    });
+    expect(result.status).toBe('failed');
+    expect(result.selected).toBeNull();
+    expect(result.failure?.reason).toBe('implementation-failure');
+    expect(result.failure?.candidates).toEqual([
+      { id: 'MOCK:PLANE-B', kind: 'adapter-contract-failure', message: 'expected 5 points, got 4' },
+    ]);
+  });
+
+  it('(d) 業務的 null だけなら今と同じ（成功候補があれば選ぶ・無ければ insufficient）で failure は null', async () => {
+    const withSuccess = await estimateCrs(
+      teiresiasE2eGcps,
+      [{ authority: 'MOCK', code: 'NO-SUCH' }, planeA],
+      { transformer: mockTransformer },
+    );
+    expect(withSuccess.status).toBe('ok_with_warnings');
+    expect(withSuccess.selected?.identity.code).toBe('PLANE-A');
+    expect(withSuccess.failure).toBeNull();
+
+    const onlyNull = await estimateCrs(teiresiasE2eGcps, [{ authority: 'MOCK', code: 'NO-SUCH' }], {
+      transformer: mockTransformer,
+    });
+    expect(onlyNull.status).toBe('insufficient');
+    expect(onlyNull.failure).toBeNull();
+  });
+
+  it('(e) 全件成功なら failure は null', async () => {
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], { transformer: mockTransformer });
+    expect(result.status).toBe('ok_with_warnings');
+    expect(result.failure).toBeNull();
+    assertInvariants(result, [planeA, planeB]);
+  });
+
+  it('複数の失敗は 1 件目で止めず、入力順に全件を failure.candidates に集める', async () => {
+    const spy = recording((id) => {
+      throw new Error(`broken ${id}`);
+    });
+    const candidates = [planeA, planeB, { authority: 'MOCK', code: 'C' }];
+    const result = await estimateCrs(teiresiasE2eGcps, candidates, { transformer: spy.transformer });
+    expect(spy.calls).toHaveLength(3);
+    expect(result.failure?.candidates.map((c) => c.id)).toEqual(['MOCK:PLANE-A', 'MOCK:PLANE-B', 'MOCK:C']);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 打ち切り（timeoutMs）と中止（signal）
+// ---------------------------------------------------------------------------
+
+const never = (): Promise<never> => new Promise<never>(() => {});
+const idsOf = (n: number): CandidateCrs[] =>
+  Array.from({ length: n }, (_, index) => ({ authority: 'MOCK', code: `C${index + 1}` }));
+
+describe('打ち切りと中止', () => {
+  afterEach(() => {
+    vi.useRealTimers();
+  });
+
+  it('(a) 2 件目が答えないと timeoutMs で failed（理由 timeout）にし、3 件目を呼ばない', async () => {
+    const spy = recording((id) => (id === 'MOCK:C2' ? never() : null));
+    const started = performance.now();
+    const result = await estimateCrs(teiresiasE2eGcps, idsOf(3), { transformer: spy.transformer, timeoutMs: 50 });
+    const elapsed = performance.now() - started;
+
+    expect(elapsed).toBeGreaterThanOrEqual(45);
+    expect(elapsed).toBeLessThan(2_000);
+    expect(result.status).toBe('failed');
+    expect(result.selected).toBeNull();
+    expect(result.failure?.reason).toBe('timeout');
+    expect(result.failure?.candidates.at(-1)).toMatchObject({ id: 'MOCK:C2', kind: 'adapter-timeout' });
+    expect(spy.calls.map((call) => call.id)).toEqual(['MOCK:C1', 'MOCK:C2']);
+    assertInvariants(result, idsOf(3));
+  });
+
+  it('打ち切りの前の実装失敗も failure.candidates に入り、打ち切った 1 件が最後に来る', async () => {
+    const transformer: CandidateTransformer = (id) => {
+      if (id === 'MOCK:C1') throw new Error('first');
+      return never();
+    };
+    const result = await estimateCrs(teiresiasE2eGcps, idsOf(3), { transformer, timeoutMs: 20 });
+    expect(result.failure?.reason).toBe('timeout');
+    expect(result.failure?.candidates.map((c) => [c.id, c.kind])).toEqual([
+      ['MOCK:C1', 'adapter-bug'],
+      ['MOCK:C2', 'adapter-timeout'],
+    ]);
+  });
+
+  it('(b)(f) timeoutMs 未指定は既定 120000 ms（119,999 ms では止まらず 120,000 ms で止まる）・タイマーが残らない', async () => {
+    vi.useFakeTimers();
+    let settled: EstimationResult | undefined;
+    const pending = estimateCrs(teiresiasE2eGcps, idsOf(1), { transformer: () => never() }).then((result) => {
+      settled = result;
+    });
+    await vi.advanceTimersByTimeAsync(119_999);
+    expect(settled).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+    expect(settled?.status).toBe('failed');
+    expect(settled?.failure?.reason).toBe('timeout');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('(c) timeoutMs: Infinity では止まらない', async () => {
+    vi.useFakeTimers();
+    let settled = false;
+    void estimateCrs(teiresiasE2eGcps, idsOf(1), { transformer: () => never(), timeoutMs: Infinity }).then(() => {
+      settled = true;
+    });
+    await vi.advanceTimersByTimeAsync(1e9);
+    expect(settled).toBe(false);
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('(f) 正常に終わった推定もタイマーを残さない', async () => {
+    vi.useFakeTimers();
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], { transformer: asyncMockTransformer });
+    expect(result.failure).toBeNull();
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('(d) 3 件目の評価中に abort すると AbortError で reject し、4 件目以降を呼ばない', async () => {
+    const controller = new AbortController();
+    const spy = recording((id) => {
+      if (id === 'MOCK:C3') {
+        setTimeout(() => controller.abort(), 10);
+        return never();
+      }
+      return null;
+    });
+    await expect(
+      estimateCrs(teiresiasE2eGcps, idsOf(5), { transformer: spy.transformer, signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(spy.calls.map((call) => call.id)).toEqual(['MOCK:C1', 'MOCK:C2', 'MOCK:C3']);
+  });
+
+  it('abort の理由を渡したらその値で reject する', async () => {
+    const controller = new AbortController();
+    const reason = new Error('user cancelled');
+    const transformer: CandidateTransformer = () => {
+      controller.abort(reason);
+      return never();
+    };
+    await expect(
+      estimateCrs(teiresiasE2eGcps, idsOf(2), { transformer, signal: controller.signal }),
+    ).rejects.toBe(reason);
+  });
+
+  it('同期の transformer の中で abort されたら、次の候補へ進まずに reject する', async () => {
+    const controller = new AbortController();
+    const spy = recording((id) => {
+      if (id === 'MOCK:C1') controller.abort();
+      return null;
+    });
+    await expect(
+      estimateCrs(teiresiasE2eGcps, idsOf(3), { transformer: spy.transformer, signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(spy.calls.map((call) => call.id)).toEqual(['MOCK:C1']);
+  });
+
+  it('(e) 開始前に abort 済みなら transformer を 1 回も呼ばずに reject する', async () => {
+    const spy = recording(mockTransformer);
+    const controller = new AbortController();
+    controller.abort();
+    await expect(
+      estimateCrs(teiresiasE2eGcps, [planeA], { transformer: spy.transformer, signal: controller.signal }),
+    ).rejects.toMatchObject({ name: 'AbortError' });
+    expect(spy.calls).toHaveLength(0);
+  });
+
+  it('打ち切られた呼び出しが後から reject しても、結果にも未処理の reject にも影響しない', async () => {
+    let rejectLate: ((error: Error) => void) | undefined;
+    const transformer: CandidateTransformer = () =>
+      new Promise((_resolve, reject) => {
+        rejectLate = reject;
+      });
+    const result = await estimateCrs(teiresiasE2eGcps, idsOf(1), { transformer, timeoutMs: 10 });
+    expect(result.failure?.reason).toBe('timeout');
+    rejectLate?.(new Error('late'));
+    await new Promise((resolve) => setTimeout(resolve, 10));
+    expect(result.failure?.candidates).toHaveLength(1);
+  });
+
+  it('正の数でない timeoutMs・非数は既定 120000 ms へ正規化する', async () => {
+    vi.useFakeTimers();
+    for (const timeoutMs of [0, -1, Number.NaN, -Infinity]) {
+      let settled: EstimationResult | undefined;
+      const pending = estimateCrs(teiresiasE2eGcps, idsOf(1), { transformer: () => never(), timeoutMs }).then(
+        (result) => {
+          settled = result;
+        },
+      );
+      await vi.advanceTimersByTimeAsync(119_999);
+      expect(settled).toBeUndefined();
+      await vi.advanceTimersByTimeAsync(1);
+      await pending;
+      expect(settled?.failure?.reason).toBe('timeout');
+    }
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('setTimeout の上限（2147483647 ms）を越える timeoutMs は打ち切りなし（Infinity）として扱う', async () => {
+    // 上限を越える遅延は setTimeout が 1 ms へ置き換えるため、そのまま渡すと即座に打ち切りになる
+    const answerLater: CandidateTransformer = (id, points, geoBasis) =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve(mockTransformer(id, points, geoBasis)), 30);
+      });
+    for (const timeoutMs of [2 ** 31, 30 * 24 * 60 * 60 * 1000, Number.MAX_SAFE_INTEGER, Number.MAX_VALUE]) {
+      const result = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: answerLater, timeoutMs });
+      expect(result.failure).toBeNull();
+      expect(result.status).not.toBe('failed');
+      expect(result.selected?.identity.code).toBe('PLANE-A');
+    }
+  });
+
+  it('上限ちょうど（2147483647 ms）はそのまま上限として効く', async () => {
+    vi.useFakeTimers();
+    let settled: EstimationResult | undefined;
+    const pending = estimateCrs(teiresiasE2eGcps, idsOf(1), {
+      transformer: () => never(),
+      timeoutMs: 2_147_483_647,
+    }).then((result) => {
+      settled = result;
+    });
+    await vi.advanceTimersByTimeAsync(2_147_483_646);
+    expect(settled).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+    expect(settled?.failure?.reason).toBe('timeout');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('transformer の中で同期に abort され、後で reject する promise を返しても未処理の reject を出さない', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const controller = new AbortController();
+      const transformer: CandidateTransformer = () => {
+        controller.abort();
+        return new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new Error('rejected after abort')), 5);
+        });
+      };
+      await expect(
+        estimateCrs(teiresiasE2eGcps, idsOf(2), { transformer, signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 失敗経路の計算量（候補数に対して線形）
+// ---------------------------------------------------------------------------
+
+/** 全候補が業務的 null の推定の所要時間（ms）。 */
+async function timeAllNull(count: number): Promise<number> {
+  const candidates = idsOf(count);
+  const started = performance.now();
+  const result = await estimateCrs(teiresiasE2eGcps, candidates, { transformer: () => null });
+  const elapsed = performance.now() - started;
+  expect(result.untransformableIds).toHaveLength(count);
+  return elapsed;
+}
+
+const median = (values: number[]): number => [...values].sort((a, b) => a - b)[Math.floor(values.length / 2)];
+
+describe('失敗経路は候補数に対して線形', () => {
+  it('候補 20,000 件と 80,000 件の所要時間の中央値の比が 8 未満（線形なら約 4、二次なら約 16）', async () => {
+    await timeAllNull(2_000); // JIT の暖機
+    const small: number[] = [];
+    const large: number[] = [];
+    for (let round = 0; round < 3; round++) {
+      small.push(await timeAllNull(20_000));
+      large.push(await timeAllNull(80_000));
+    }
+    const ratio = median(large) / median(small);
+    console.info(
+      `[linear-failure-path] 20000: ${small.map((v) => v.toFixed(1)).join(', ')} ms / ` +
+        `80000: ${large.map((v) => v.toFixed(1)).join(', ')} ms / ratio ${ratio.toFixed(2)}`,
+    );
+    expect(ratio).toBeLessThan(8);
+  }, 120_000);
+});
+
+// ---------------------------------------------------------------------------
+// 診断の粒度
+// ---------------------------------------------------------------------------
+
+describe('診断の粒度', () => {
+  it('(a) 空入力に [] を返す transformer は adapter-contract-failure で failed', async () => {
+    const result = await estimateCrs([], [planeA], { transformer: () => [] });
+    expect(result.status).toBe('failed');
+    expect(result.failure).toEqual({
+      reason: 'implementation-failure',
+      candidates: [{ id: 'MOCK:PLANE-A', kind: 'adapter-contract-failure', message: 'empty input must give null' }],
+    });
+  });
+
+  it('(b) 非有限の点は message に点の番号', async () => {
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: nonFiniteOutputMockTransformer });
+    expect(result.failure?.candidates).toEqual([
+      { id: 'MOCK:PLANE-A', kind: 'adapter-contract-failure', message: 'point 0 is not a pair of finite numbers' },
+    ]);
+  });
+
+  it('配列でない出力は message が not an array', async () => {
+    const transformer = (() => ({ length: 5 })) as unknown as CandidateTransformer;
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer });
+    expect(result.failure?.candidates[0]).toEqual({
+      id: 'MOCK:PLANE-A',
+      kind: 'adapter-contract-failure',
+      message: 'not an array',
+    });
+  });
+
+  it('(c) 長い message は 500 文字で切れる・Error でない throw は文字列にする', async () => {
+    const long = await estimateCrs(teiresiasE2eGcps, [planeA], {
+      transformer: () => {
+        throw new Error('x'.repeat(2_000));
+      },
+    });
+    expect(long.failure?.candidates[0].message).toBe('x'.repeat(500));
+
+    const nonError = await estimateCrs(teiresiasE2eGcps, [planeA], {
+      transformer: () => {
+        throw 42;
+      },
+    });
+    expect(nonError.failure?.candidates[0].message).toBe('42');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// holdout（Daedalus の holdout 検証へ渡す）
+// ---------------------------------------------------------------------------
+
+/** pixel → lon/lat に shear を含む写像（相似では表せない）。 */
+const shearedGeoOf = (u: number, v: number): [number, number] => [
+  135 + u * 0.0078125 + v * 0.001953125,
+  35 + v * 0.0078125,
+];
+/** GCP 5 点。pixel に小さな誤差を入れる（誤差 0 の affine は F 検定が成り立たない）。 */
+const shearedGcps: GcpPair[] = (
+  [
+    [0, 0, 0.01, 0],
+    [10, 0, 0, -0.01],
+    [0, 10, -0.01, 0.01],
+    [10, 10, 0.01, 0.01],
+    [4, 6, 0, 0],
+  ] as const
+).map(([u, v, du, dv]) => ({ pixel: [u + du, v + dv], geo: shearedGeoOf(u, v) }));
+const shearedHoldout: GcpPair[] = (
+  [
+    [7, 3],
+    [2, 8],
+  ] as const
+).map(([u, v]) => ({ pixel: [u, v], geo: shearedGeoOf(u, v) }));
+const reflect = (pairs: readonly GcpPair[]): GcpPair[] =>
+  pairs.map((pair) => ({ pixel: [pair.pixel[0], -pair.pixel[1]], geo: pair.geo }));
+
+describe('holdout', () => {
+  it('(a) shear 入りの 5 点と holdout 2 点で affine が採用され、status ok・warnings なし', async () => {
+    const result = await estimateCrs(shearedGcps, [planeA, planeB], {
+      transformer: mockTransformer,
+      holdout: shearedHoldout,
+    });
+    expect(result.status).toBe('ok');
+    expect(result.warnings).toEqual([]);
+    expect(result.failure).toBeNull();
+    expect(result.selected?.identity.code).toBe('PLANE-A');
+    expect(result.selected?.worldFile.xSkew).not.toBe(0);
+    assertInvariants(result, [planeA, planeB]);
+  });
+
+  it('holdout が無ければ同じ入力は validationSkipped つき（ok_with_warnings）', async () => {
+    const result = await estimateCrs(shearedGcps, [planeA, planeB], { transformer: mockTransformer });
+    expect(result.status).toBe('ok_with_warnings');
+    expect(result.warnings).toEqual([{ code: 'validationSkipped' }]);
+  });
+
+  it('(b) transformer の呼び出しは候補数と同じで、各呼び出しの点数は GCP と holdout の和', async () => {
+    const spy = recording(mockTransformer);
+    await estimateCrs(shearedGcps, [planeA, planeB], { transformer: spy.transformer, holdout: shearedHoldout });
+    expect(spy.calls).toHaveLength(2);
+    for (const call of spy.calls) {
+      expect(call.points).toEqual([...shearedGcps, ...shearedHoldout].map((pair) => pair.geo));
+    }
+  });
+
+  it('(c) 反射ありの同じ入力（GCP と holdout の pixel の y を反転）は identity と RMS が同じで、xSkew と yScale の符号だけが反転', async () => {
+    const forward = await estimateCrs(shearedGcps, [planeA, planeB], {
+      transformer: mockTransformer,
+      holdout: shearedHoldout,
+    });
+    const reflected = await estimateCrs(reflect(shearedGcps), [planeA, planeB], {
+      transformer: mockTransformer,
+      holdout: reflect(shearedHoldout),
+    });
+    expect(reflected.status).toBe('ok');
+    expect(reflected.selected?.identity).toEqual(forward.selected?.identity);
+    expect(reflected.selected?.rmsMeters).toBe(forward.selected?.rmsMeters);
+    const f = forward.selected?.worldFile;
+    const r = reflected.selected?.worldFile;
+    expect(r).toEqual({
+      xScale: f?.xScale,
+      xSkew: -(f?.xSkew as number),
+      xOrigin: f?.xOrigin,
+      ySkew: f?.ySkew,
+      yScale: -(f?.yScale as number),
+      yOrigin: f?.yOrigin,
+    });
+  });
+
+  it('(d) holdout: [] は未指定と同じ結果', async () => {
+    const without = await estimateCrs(shearedGcps, [planeA, planeB], { transformer: mockTransformer });
+    const empty = await estimateCrs(shearedGcps, [planeA, planeB], { transformer: mockTransformer, holdout: [] });
+    expect(empty).toEqual(without);
+  });
+
+  it('GCP と holdout をつないだ点列の長さが合わなければ adapter-contract-failure', async () => {
+    const result = await estimateCrs(shearedGcps, [planeA], {
+      transformer: brokenLengthMockTransformer,
+      holdout: shearedHoldout,
+    });
+    expect(result.failure?.candidates[0]).toEqual({
+      id: 'MOCK:PLANE-A',
+      kind: 'adapter-contract-failure',
+      message: 'expected 7 points, got 6',
+    });
   });
 });

@@ -14,8 +14,11 @@ import type { ProjectedCrsInfo } from '@c4h/atlas';
 import { estimateCrs } from '../src/index.js';
 import type {
   CandidateCrs,
+  CandidateFailure,
+  CandidateFailureKind,
   CandidateTransformer,
   EstimateOptions,
+  EstimationFailure,
   EstimationResult,
   FitStatus,
   FitWarning,
@@ -52,6 +55,26 @@ const fullOptions: EstimateOptions = {
   normalizeEpsilonMeters: 100,
   datumFamilyPrior: ['MOCKDATUM'],
   chirality: 'normalize',
+  holdout: [{ pixel: [5, 5], geo: [135.0390625, 35.0390625] }],
+  timeoutMs: 60_000,
+  signal: new AbortController().signal,
+};
+
+/** `timeoutMs` は Infinity で無効にできる。 */
+const unboundedOptions: EstimateOptions = { transformer: syncTransformer, timeoutMs: Infinity, holdout: [] };
+
+// --- 実装側の失敗: 4 種の kind・候補ごとの理由・2 種の reason ----------------------
+const failureKinds: readonly CandidateFailureKind[] = [
+  'adapter-bug',
+  'adapter-contract-failure',
+  'dependency-contract-failure',
+  'adapter-timeout',
+];
+const candidateFailure: CandidateFailure = { id: 'MOCK:PLANE-B', kind: 'adapter-bug', message: 'boom' };
+const implementationFailure: EstimationFailure = { reason: 'implementation-failure', candidates: [candidateFailure] };
+const timeoutFailure: EstimationFailure = {
+  reason: 'timeout',
+  candidates: [{ id: 'MOCK:PLANE-A', kind: 'adapter-timeout', message: 'no answer within 60000 ms' }],
 };
 
 /** `chirality` は 2 値の union（既定 'normalize'）。 */
@@ -79,13 +102,23 @@ const gate: QualityGate = 'adoptable';
 const status: FitStatus = 'ok_with_warnings';
 const warning: FitWarning = { code: 'validationSkipped' };
 
-// --- EstimationResult: 5 フィールドと selected の内訳を型で束縛する -------------
+// --- EstimationResult: 6 フィールドと selected の内訳を型で束縛する -------------
 const emptyResult: EstimationResult = {
   status,
   selected: null,
   ranked: [],
   warnings: [warning],
   untransformableIds: [],
+  failure: null,
+};
+
+const failedResult: EstimationResult = {
+  status: 'failed',
+  selected: null,
+  ranked: [],
+  warnings: [],
+  untransformableIds: ['MOCK:PLANE-B'],
+  failure: implementationFailure,
 };
 
 const selectedResult: EstimationResult = {
@@ -100,6 +133,7 @@ const selectedResult: EstimationResult = {
   ranked: [{ authority: candidate.authority, code: candidate.code, score: 0.5, rmsMeters: 12.5 }],
   warnings: [],
   untransformableIds: ['MOCK:PLANE-B'],
+  failure: null,
 };
 
 // --- m2a-t1/AC-1(a): ProjectedCrsInfo → CandidateCrs の assignability ----------
@@ -131,18 +165,20 @@ export type ProjectedCrsInfoIsAssignableToCandidateCrs = AssertAssignableTo<
 const invoke = (): Promise<EstimationResult> => estimateCrs(gcps, [candidate], fullOptions);
 
 describe('api smoke（公開型と estimateCrs signature の compile-time 束縛）', () => {
-  it('estimateCrs は Promise<EstimationResult> を返し、5 フィールドが型どおりである', async () => {
+  it('estimateCrs は Promise<EstimationResult> を返し、6 フィールドが型どおりである', async () => {
     const result: EstimationResult = await invoke();
     const resultStatus: FitStatus = result.status;
     const selected: EstimationResult['selected'] = result.selected;
     const ranked: EstimationResult['ranked'] = result.ranked;
     const warnings: readonly FitWarning[] = result.warnings;
     const untransformableIds: string[] = result.untransformableIds;
+    const failure: EstimationFailure | null = result.failure;
 
     expect(typeof resultStatus).toBe('string');
     expect(Array.isArray(ranked)).toBe(true);
     expect(Array.isArray(warnings)).toBe(true);
     expect(Array.isArray(untransformableIds)).toBe(true);
+    expect(failure === null || Array.isArray(failure.candidates)).toBe(true);
 
     if (selected !== null) {
       const selectedGate: Exclude<QualityGate, 'unusable'> = selected.qualityGate;
@@ -193,5 +229,17 @@ describe('api smoke（公開型と estimateCrs signature の compile-time 束縛
     expect(selectedResult.selected?.identity.code).toBe('PLANE-A');
     expect(selectedResult.ranked[0]?.rmsMeters).toBe(12.5);
     expect(selectedResult.untransformableIds).toEqual(['MOCK:PLANE-B']);
+    expect(selectedResult.failure).toBeNull();
+    expect(failedResult.failure?.candidates[0]?.kind).toBe('adapter-bug');
+  });
+
+  it('失敗の型と新しい option が実体を持つ', () => {
+    expect(failureKinds).toHaveLength(4);
+    expect(implementationFailure.reason).toBe('implementation-failure');
+    expect(timeoutFailure.candidates.at(-1)?.kind).toBe('adapter-timeout');
+    expect(fullOptions.holdout).toHaveLength(1);
+    expect(fullOptions.timeoutMs).toBe(60_000);
+    expect(fullOptions.signal?.aborted).toBe(false);
+    expect(unboundedOptions.timeoutMs).toBe(Infinity);
   });
 });

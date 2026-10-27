@@ -18,7 +18,14 @@ English README is [here](./README.md).
 
 ```ts
 import { estimateCrs } from '@c4h/teiresias';
-import type { CandidateCrs, EstimateOptions, EstimationResult } from '@c4h/teiresias';
+import type {
+  CandidateCrs,
+  CandidateFailure,
+  CandidateFailureKind,
+  EstimateOptions,
+  EstimationFailure,
+  EstimationResult,
+} from '@c4h/teiresias';
 
 const result: EstimationResult = await estimateCrs(gcps, candidates, {
   transformer,                 // 必須。候補 CRS への変換 adapter
@@ -28,8 +35,29 @@ const result: EstimationResult = await estimateCrs(gcps, candidates, {
   normalizeEpsilonMeters,      // 省略時 100（m）
   datumFamilyPrior,            // 省略時 中立（prior なし）
   chirality,                   // 省略時 'normalize'。'direct-only' は反射を吸収しない
+  holdout,                     // 省略時 なし。affine の採否の検証だけに使う GCP
+  timeoutMs,                   // 省略時 120000（ms）。transformer の呼び出し 1 回の上限。Infinity で無効
+  signal,                      // 省略時 なし。推定全体を中止する AbortSignal
 });
 ```
+
+- `holdout`（`readonly GcpPair[]`。`geo` は `geoBasis` の順）は Daedalus の holdout 検証に渡す。
+  当てはめには使わない。transformer の呼び出しは候補ごとに 1 回のまま（GCP と holdout の地理座標を
+  つないで 1 回で変換する）。空配列は省略と同じ。
+- `timeoutMs` は候補 1 件の **transformer の呼び出し 1 回**の上限。その内に答えなければ、推定を
+  その場で止め、`status: 'failed'`・`failure.reason: 'timeout'` を返す（残りの候補は呼ばない）。
+  正の数でない値は既定に戻す。2147483647（`setTimeout` が受けられる遅延の上限）を越える値は
+  `Infinity`（上限なし）として扱う。Promise を返して待たせる transformer の上限であり、同期で処理を
+  握り続ける transformer は打ち切れない。
+- `signal` が中止されたら、`estimateCrs` は `signal.reason`（無ければ `AbortError` の
+  `DOMException`）で reject する（`AbortSignal` を受ける Web の API の慣例）。次の候補は呼ばない。
+  `estimateCrs` が reject するのは中止のときだけである。
+- 結果の `failure`（`EstimationFailure | null`）は `status` が `failed` の理由を示す。`reason` は
+  `'implementation-failure'` か `'timeout'`、`candidates` は失敗した候補（`CandidateFailure`: `id`・
+  `kind`・`message`）を候補の入力順に並べる。`CandidateFailureKind` は `'adapter-bug'`（transformer が
+  throw／reject した）・`'adapter-contract-failure'`（出力が契約に反する: 長さの不一致・非有限の点・
+  空入力に配列を返した など）・`'dependency-contract-failure'`（Daedalus の返却が公開契約に反する）・
+  `'adapter-timeout'` の 4 つ。`message` は 500 文字で切る。`failed` 以外では `failure` は `null`。
 
 `WorldFile` / `GcpPair` / `GeoBasis` / `FitStatus` / `QualityGate` / `FitWarning` /
 `MaybePromise` は `@c4h/daedalus` の公開型を再 export したものであり、Teiresias では再定義しない。
@@ -93,8 +121,9 @@ const result = await estimateCrs(gcps, rows, {
 transformer は、`geoBasis` が `{ kind: 'lonlat_deg', axisOrder: 'lon-lat' }` でないときと、行に無い id の
 ときに `null` を返す（契約 (7) の「業務的に変換不能」）。Atlas 側の失敗は `null` にならず throw される。
 Teiresias は throw／reject を候補ごとに受け止め、その候補を adapter bug として記録して `untransformableIds`
-に入れ、残りの候補の評価を続ける ∴ `estimateCrs` 自体は reject しない。usable な候補が 0 件で、こうした
-失敗が 1 件以上あれば status は `failed` になる（後述「status と診断」）。実 engine の E2E
+に入れ、残りの候補の評価を続ける ∴ `estimateCrs` 自体は reject しない。こうした失敗が 1 件でもあれば、
+他の候補が usable でも status は `failed`・`selected` は `null` になり、`failure` が失敗した候補を示す
+（後述「status と診断」）。実 engine の E2E
 （`tests/estimate-crs.real-engine.e2e.test.ts`）とデモ（`demo/atlas-engine.js`）はこの形で配線している。
 
 ## ranking と score
@@ -134,14 +163,24 @@ final RMS を別名で公開する API は無い。
 
 ## status と診断
 
-| 条件 | `status` | `selected` |
-|---|---|---|
-| usable 件数 >= `minCandidates`、選択候補の warnings 0 件 | `ok` | 先頭候補 |
-| usable 件数 >= `minCandidates`、選択候補の warnings 1 件以上 | `ok_with_warnings` | 先頭候補 |
-| usable 件数 < `minCandidates` | `insufficient` | `null` |
-| usable 0 件で adapter contract failure / adapter bug / dependency contract failure が 1 件以上 | `failed` | `null` |
+上から評価し、最初に当たった行で決まる。
 
-最後の 2 条件が重なる場合は、実装失敗を候補不足へ埋没させないため `failed` を優先する。
+| 条件 | `status` | `selected` | `failure` |
+|---|---|---|---|
+| transformer の呼び出しが打ち切られた（`adapter-timeout`） | `failed` | `null` | `{ reason: 'timeout', candidates }`（打ち切った候補が最後） |
+| adapter bug / adapter contract failure / dependency contract failure が 1 件以上 | `failed` | `null` | `{ reason: 'implementation-failure', candidates }`（全件） |
+| usable 件数 >= `minCandidates`、選択候補の warnings 0 件 | `ok` | 先頭候補 | `null` |
+| usable 件数 >= `minCandidates`、選択候補の warnings 1 件以上 | `ok_with_warnings` | 先頭候補 | `null` |
+| それ以外（usable 件数 < `minCandidates`） | `insufficient` | `null` | `null` |
+
+実装側の失敗は、他の候補が usable でも `failed` にする。失敗した候補が真値だったかを Teiresias は
+判断できず、残りから選ぶと黙って誤った候補を選びうるためである。評価は（打ち切りの後を除き）最後の
+候補まで続けるので、直すべき候補を `failure.candidates` で一度に知ることができる。
+
+- `status: 'failed'` のとき、`ranked` は評価できた候補だけの不完全な順位であり、診断用である。
+  候補の選択に使ってはならない。
+- `status: 'ok'` になるのは、`holdout` を渡して Daedalus が affine を採用したときだけである。それ以外の
+  成功 fit は warning（`validationSkipped` など）を 1 件以上持つので `ok_with_warnings` になる。
 
 - `warnings` は成功時は **selected 候補の Daedalus `FitWarning` だけ**を同順・同形で返す。
   敗北候補の warning を identity なしで混ぜない。`WarningCode` は Daedalus の凍結 7 値のままで、
@@ -155,7 +194,7 @@ final RMS を別名で公開する API は無い。
 `EstimationResult` は**診断返却**である。Editor が明示的に採用した後に永続化してよいのは
 **選択された identity と採用 worldFile だけ**である。
 
-`ranked` / `score` / basic RMS / `qualityGate` / `warnings` / `untransformableIds` /
+`ranked` / `score` / basic RMS / `qualityGate` / `warnings` / `untransformableIds` / `failure` /
 `selected` object 全体は保存しない。`qualityGate: 'preview'` の返却も同様で、保存・採用の判断は
 ライブラリではなく Editor の責務である。
 
@@ -173,17 +212,17 @@ final RMS を別名で公開する API は無い。
 - **実 engine の E2E は接続済み**: `tests/estimate-crs.real-engine.e2e.test.ts` が実 CRS engine
   （Atlas / proj-wasm）を注入した E2E を持つ。mock E2E（`estimate-crs.e2e.test.ts`）は
   契約の決定的な検証として併存する。
-- **`status: 'ok'` は現行公開 API から到達不能**: `EstimateOptions` は Daedalus の `holdout` を
-  公開しないため、実 Daedalus の成功 fit は必ず warning を 1 件以上持つ。分岐は `FitStatus` 互換と
-  将来の holdout 対応のために保持し、内部 helper の単体検証で担保している。
+- **`timeoutMs` が効くのは非同期の待ちだけ**: JavaScript のスレッドを同期で握り続ける transformer は、
+  タイマーが動けないので打ち切れない。Atlas の transformer（`createCandidateTransformer`）は Promise を
+  返すので、エンジンの初期化などの非同期の待ちには上限が効くが、その中の同期の変換処理には効かない。
 - **単位**: 成功候補の transformer 出力は metre 固定。foot / native unit の扱いは未対応である。
 - **同値な候補**: カタログには、識別子は違うが投影の定義（PROJ 文字列）が同じ CRS が含まれうる
   （例: `EPSG:2448`・`EPSG:6674`・`ESRI:112206`）。これらは推定でまったく同じ値になるため、`ranked` の
   中の並びは identity の順で決まる。同値な候補の群を返す API は無い。候補の `proj4` を比べれば
   見分けられる（[#4](https://github.com/code4history/Teiresias/issues/4) で扱う）。
 - **未対応**: inverse 変換による geodesic RMS、アンチメリディアン、極域、epoch / grid provenance、
-  robust / weight / LOO / bootstrap、進捗 callback、並列候補処理、キャンセル。キャンセルは npm の
-  初版で対応する予定。それ以外は [#5](https://github.com/code4history/Teiresias/issues/5) で扱う。
+  robust / weight / LOO / bootstrap、進捗 callback、並列候補処理。
+  [#5](https://github.com/code4history/Teiresias/issues/5) で扱う。
 - **CLI は無い**: Teiresias はライブラリだけを提供する。コマンドラインの道具は無い。
 - **配布**: 本 package はまだ npm に公開していない（`private: true`）。`@c4h/daedalus` は
   ローカル sibling の `link:../Daedalus` で解決している。
