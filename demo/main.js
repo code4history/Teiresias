@@ -403,7 +403,9 @@ export function initDemo(config = {}) {
     setText(el.flow, scene ? flowLineOf(scene, state.candidates.length) : '');
     setText(
       el.resultCount,
-      scene ? `候補 ${scene.ranked.length} 件（モード: ${state.candidateMode}）` : '未計算',
+      scene
+        ? `${state.place.label}・候補 ${scene.ranked.length} 件（モード: ${state.candidateMode}）`
+        : '未計算',
     );
     setText(
       el.untransformable,

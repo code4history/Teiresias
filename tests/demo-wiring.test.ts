@@ -41,7 +41,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { Y_SCALE_SIGN_LABELS, initDemo } from '../demo/main.js';
 import { GCP_LONLAT } from '../demo/estimate-scene.js';
 import { PRESETS, PRESET_OPTION_IDS, findPreset } from '../demo/presets.js';
-import { DAEDALUS_DEMO_URL, scenes } from '../demo/scenes.js';
+import { scenes } from '../demo/scenes.js';
 
 // ---------------------------------------------------------------------------
 // ページの自動起動の検査用（`demo/atlas-engine.js` を最小の module に差し替える）
@@ -86,23 +86,98 @@ const LAT0 = 35.0;
 const SCALE = 100_000;
 
 /**
- * 候補 3 件。真値だけが**等方スケール**（= 相似変換で厳密適合する）であり、他の 2 件は
+ * 投影の定義（`proj4` の文字列）。stub は実際には投影しないが、`runScene` はこの文字列の
+ * 一致で「同値」（真値と同じ定義）を判定する ∴ stub の候補の定義はここで決める。
+ */
+const DEFINITION_VI =
+  '+proj=tmerc +lat_0=36 +lon_0=135 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs';
+const DEFINITION_VI_EAST =
+  '+proj=tmerc +lat_0=36 +lon_0=135.5 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs';
+const DEFINITION_VII =
+  '+proj=tmerc +lat_0=36 +lon_0=135 +k=1 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs';
+const DEFINITION_TOKYO =
+  '+proj=tmerc +lat_0=36 +lon_0=139.833333 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs';
+
+/** 変換できない（transformer が `null` を返す）候補。 */
+const UNTRANSFORMABLE_ID = 'EPSG:9991';
+/** 変換はできるが当てはめに使えない（全点が同じ座標になる）候補。 */
+const UNFITTABLE_ID = 'EPSG:9992';
+/** 真値と同じ `proj4` を持つ（「同値」の印が付く）候補。 */
+const SAME_DEFINITION_ID = 'EPSG:2448';
+/** 識別力で比べる相手（1 位と同じ定義の候補を飛ばした最初の行）。 */
+const DISCRIMINATION_AGAINST_ID = 'EPSG:6673';
+
+const UNTRANSFORMABLE_IDS = new Set([UNTRANSFORMABLE_ID]);
+const UNFITTABLE_IDS = new Set([UNFITTABLE_ID]);
+
+/**
+ * 京都の候補。真値だけが**等方スケール**（= 相似変換で厳密適合する）であり、他の行は
  * わずかに非等方である ∴
  *   - 反射なし … 真値 rms = 0 → 比は Infinity（識別できている）
- *   - 反射あり … 3 件とも反射由来の巨大残差に支配され、差は `1e-3` 相対 → 比は 1.0x（潰れる）
+ *   - 反射あり … 全行が反射由来の巨大残差に支配され、差は `1e-3` 相対 → 比は 1.0x（潰れる）
  * これは実 engine で観測される現象（`1.000199…`）と**同じ構造**である。
+ *
+ * 流れの 3 つの件数を 1 つずつ違えるため、`null` を返す行と当てはめに使えない行を混ぜる。
  */
 const STUB_CANDIDATES = [
-  { id: 'EPSG:6674', authority: 'EPSG', code: '6674', sx: SCALE, sy: SCALE },
-  { id: 'EPSG:6673', authority: 'EPSG', code: '6673', sx: SCALE, sy: SCALE * (1 + 1e-3) },
-  { id: 'EPSG:6675', authority: 'EPSG', code: '6675', sx: SCALE * (1 + 2e-3), sy: SCALE },
+  { id: 'EPSG:6674', authority: 'EPSG', code: '6674', sx: SCALE, sy: SCALE, proj4: DEFINITION_VI },
+  {
+    id: SAME_DEFINITION_ID,
+    authority: 'EPSG',
+    code: '2448',
+    sx: SCALE * (1 + 5e-5),
+    sy: SCALE,
+    proj4: DEFINITION_VI,
+  },
+  {
+    id: DISCRIMINATION_AGAINST_ID,
+    authority: 'EPSG',
+    code: '6673',
+    sx: SCALE,
+    sy: SCALE * (1 + 1e-3),
+    proj4: DEFINITION_VI_EAST,
+  },
+  {
+    id: 'EPSG:6675',
+    authority: 'EPSG',
+    code: '6675',
+    sx: SCALE * (1 + 2e-3),
+    sy: SCALE,
+    proj4: DEFINITION_VII,
+  },
+  { id: UNTRANSFORMABLE_ID, authority: 'EPSG', code: '9991', sx: SCALE, sy: SCALE },
+  { id: UNFITTABLE_ID, authority: 'EPSG', code: '9992', sx: 0, sy: 0 },
 ];
 
 /** 東京の場面用。真値（`scenes.tokyo.truthId`）だけが等方スケールである。 */
 const STUB_TOKYO_CANDIDATES = [
-  { id: scenes.tokyo.truthId, authority: 'EPSG', code: '6677', sx: SCALE, sy: SCALE },
+  {
+    id: scenes.tokyo.truthId,
+    authority: 'EPSG',
+    code: '6677',
+    sx: SCALE,
+    sy: SCALE,
+    proj4: DEFINITION_TOKYO,
+  },
+  {
+    id: 'EPSG:6678',
+    authority: 'EPSG',
+    code: '6678',
+    sx: SCALE * (1 + 5e-5),
+    sy: SCALE,
+    proj4: DEFINITION_TOKYO,
+  },
   { id: 'EPSG:6676', authority: 'EPSG', code: '6676', sx: SCALE, sy: SCALE * (1 + 1e-3) },
-  { id: scenes.kyoto.truthId, authority: 'EPSG', code: '6674', sx: SCALE * (1 + 2e-3), sy: SCALE },
+  {
+    id: scenes.kyoto.truthId,
+    authority: 'EPSG',
+    code: '6674',
+    sx: SCALE * (1 + 2e-3),
+    sy: SCALE,
+    proj4: DEFINITION_VI,
+  },
+  { id: UNTRANSFORMABLE_ID, authority: 'EPSG', code: '9991', sx: SCALE, sy: SCALE },
+  { id: UNFITTABLE_ID, authority: 'EPSG', code: '9992', sx: 0, sy: 0 },
 ];
 
 const EXTRA_CANDIDATE = {
@@ -125,6 +200,17 @@ function stubCandidatesFor(mode: string, scene: { id?: string } | undefined): St
   return mode === 'zones' ? base : [...base, EXTRA_CANDIDATE];
 }
 
+/**
+ * 流れの表示に出るはずの 3 つの件数を、**stub の定義だけ**から決める
+ * （候補の件数・変換できた件数・当てはめた件数）。
+ */
+function expectedFlowFor(mode: string, scene: { id?: string } | undefined) {
+  const rows = stubCandidatesFor(mode, scene);
+  const transformable = rows.filter((row) => !UNTRANSFORMABLE_IDS.has(row.id));
+  const fittable = transformable.filter((row) => !UNFITTABLE_IDS.has(row.id));
+  return { candidates: rows.length, transformed: transformable.length, fitted: fittable.length };
+}
+
 function makeStubEngine() {
   const loadCandidates = vi.fn(async (mode: string, scene?: { id?: string }) => stubCandidatesFor(mode, scene));
   return {
@@ -134,17 +220,36 @@ function makeStubEngine() {
       const byId = new Map(rows.map((row) => [row.id, row]));
       return (id: string, points: ReadonlyArray<readonly [number, number]>, geoBasis: { kind: string; axisOrder: string }) => {
         if (geoBasis.kind !== 'lonlat_deg' || geoBasis.axisOrder !== 'lon-lat') return null;
+        if (UNTRANSFORMABLE_IDS.has(id)) return null;
         const target = byId.get(id);
         if (target === undefined) return null;
         return projectWith(target, points);
       };
     }),
-    projectTruth: vi.fn(async (rows: StubRow[], scene?: { truthId?: string }) => {
-      const truthId = scene?.truthId ?? scenes.kyoto.truthId;
+    // 真値の投影は**渡された場面**の GCP を使う（場面を取り違えれば値が変わる）。
+    projectTruth: vi.fn(async (rows: StubRow[], scene?: { id?: string; truthId?: string; gcpLonLat?: unknown }) => {
+      const place = scene ?? scenes.kyoto;
+      const truthId = place.truthId ?? scenes.kyoto.truthId;
       const row = rows.find((entry) => entry.id === truthId);
       if (row === undefined) throw new Error(`stub の候補に真値 ${truthId} が無い`);
-      return projectWith(row, GCP_LONLAT as ReadonlyArray<readonly [number, number]>);
+      return projectWith(row, place.gcpLonLat as ReadonlyArray<readonly [number, number]>);
     }),
+  };
+}
+
+/**
+ * すべての候補の変換で例外を投げる engine。推定は `status: 'failed'` と `failure` を返す ∴
+ * 流れの行が失敗の表示になる。
+ */
+function makeFailingEngine() {
+  const base = makeStubEngine();
+  return {
+    loadEngine: base.loadEngine,
+    loadCandidates: base.loadCandidates,
+    makeTransformer: vi.fn(() => () => {
+      throw new Error('stub の変換は失敗する');
+    }),
+    projectTruth: base.projectTruth,
   };
 }
 
@@ -224,7 +329,7 @@ describe('m3-t1/AC-6: デモの DOM 結線（jsdom / stub engine 注入）', () 
 
     const rows = document.querySelectorAll('#ranked-body tr');
     expect(rows.length).toBe(demo.getState().scene.ranked.length);
-    expect(rows.length).toBe(STUB_CANDIDATES.length);
+    expect(rows.length).toBe(expectedFlowFor('zones', scenes.kyoto).fitted);
     // 反射なしでは真値が 1 位
     expect(rows[0].children[1].textContent).toBe('EPSG:6674');
     expect(rows[0].children[4].textContent).toBe('真値');
@@ -323,7 +428,9 @@ describe('m3-t1/AC-6: デモの DOM 結線（jsdom / stub engine 注入）', () 
     expect(engine.loadCandidates).toHaveBeenCalledTimes(2);
     expect(engine.loadCandidates).toHaveBeenLastCalledWith('catalog', scenes.kyoto);
     expect(demo.getState().candidateMode).toBe('catalog');
-    expect(document.querySelectorAll('#ranked-body tr').length).toBe(4);
+    expect(document.querySelectorAll('#ranked-body tr').length).toBe(
+      expectedFlowFor('catalog', scenes.kyoto).fitted,
+    );
   });
 
   it('(c) ドラッグで pixel が動き、#reset-gcp の click で初期値へ戻る', async () => {
@@ -385,6 +492,25 @@ function flowNumbers(): number[] {
 
 function flowText(): string {
   return document.getElementById('flow')?.textContent ?? '';
+}
+
+function discriminationText(): string {
+  return document.getElementById('discrimination')?.textContent ?? '';
+}
+
+function resultCountText(): string {
+  return document.getElementById('result-count')?.textContent ?? '';
+}
+
+/**
+ * 画面の比の書式（`formatRatio` と同じ規則）。比の数値が stub の結果どおりに
+ * 6 桁で出ているかを見るために使う。
+ */
+function formatRatioForTest(ratio: number | null): string {
+  if (ratio === null) return '—';
+  if (!Number.isFinite(ratio)) return '∞';
+  if (ratio >= 1e4) return ratio.toExponential(4);
+  return ratio.toFixed(6);
 }
 
 /** 順位の表の「真値」の列の番号（見出しから引く。位置を直書きしない）。 */
@@ -487,12 +613,13 @@ describe('プリセットの帯（ボタン → 入力・計算 1 回・見え�
         // 見え方の 1 行はプリセットの文と一致する
         expect(expectationText()).toBe(option.expectation);
 
-        // 流れの表示の 3 つの件数が結果と一致し、1 位が出る
+        // 流れの表示の 3 つの件数が stub の定義どおりで、1 位が出る
         const scene = demo.getState().scene;
+        const expectedFlow = expectedFlowFor(option.input.candidateMode, option.scene);
         expect(flowNumbers().slice(0, 3)).toEqual([
-          demo.getState().candidateCount,
-          demo.getState().candidateCount - scene.untransformableIds.length,
-          scene.ranked.length,
+          expectedFlow.candidates,
+          expectedFlow.transformed,
+          expectedFlow.fitted,
         ]);
         expect(flowText()).toContain(scene.ranked[0].id);
       });
@@ -517,7 +644,8 @@ describe('プリセットの帯（ボタン → 入力・計算 1 回・見え�
     const demo = initDemo({ engine: makeStubEngine() });
     await demo.whenSettled();
 
-    const links = document.querySelectorAll(`a[href="${DAEDALUS_DEMO_URL}"]`);
+    const expectedUrl = 'https://code4history.dev/Daedalus/demo/worldfile-fit.html';
+    const links = document.querySelectorAll(`a[href="${expectedUrl}"]`);
     expect(links.length).toBe(1);
     expect(document.getElementById('selected-body')?.contains(links[0] as Node)).toBe(true);
   });
@@ -536,6 +664,125 @@ describe('プリセットの帯（ボタン → 入力・計算 1 回・見え�
     expect(demo.getState().scene.selected.worldFile.yScale).toBeLessThan(0);
     expect(selected()).toContain(Y_SCALE_SIGN_LABELS.negative);
     expect(selected()).not.toContain(Y_SCALE_SIGN_LABELS.positive);
+  });
+});
+
+describe('流れ・識別力・印・失敗の表示（stub の定義から期待値を決める）', () => {
+  beforeEach(() => {
+    mountPage();
+  });
+
+  it('流れの行の 3 つの件数が stub の定義どおりで、互いに違う値になる', async () => {
+    const demo = initDemo({ engine: makeStubEngine() });
+    await demo.whenSettled();
+
+    const expected = expectedFlowFor('zones', scenes.kyoto);
+    expect(flowNumbers().slice(0, 3)).toEqual([
+      expected.candidates,
+      expected.transformed,
+      expected.fitted,
+    ]);
+    // 3 つの数が同じ値では、取り違えても気づけない ∴ 全部違うことを明示する
+    expect(expected.candidates).not.toBe(expected.transformed);
+    expect(expected.transformed).not.toBe(expected.fitted);
+    expect(expected.candidates).not.toBe(expected.fitted);
+  });
+
+  it('識別力の札に、stub の結果から決まる比の数値が出る', async () => {
+    const demo = initDemo({ engine: makeStubEngine() });
+    await demo.whenSettled();
+
+    // 反射を吸収しない状態で y を反転すると、どの候補も厳密適合しない ∴ 比が有限の数値になる
+    const chirality = document.getElementById('chirality') as HTMLInputElement;
+    chirality.checked = false;
+    chirality.dispatchEvent(new Event('change'));
+    const checkbox = document.getElementById('y-flip') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change'));
+    await demo.whenSettled();
+
+    const ratio = demo.getState().scene.discrimination.ratio;
+    expect(ratio).not.toBeNull();
+    expect(Number.isFinite(ratio)).toBe(true);
+    expect(ratio).toBeGreaterThan(0);
+    expect(discriminationText()).toContain(`識別力 rms[比べた相手]/rms[1位] = ${formatRatioForTest(ratio)}`);
+  });
+
+  it('識別力の札に「比べた相手」として stub の正しい候補 ID が出る', async () => {
+    const demo = initDemo({ engine: makeStubEngine() });
+    await demo.whenSettled();
+
+    expect(discriminationText()).toContain(`比べた相手: ${DISCRIMINATION_AGAINST_ID}`);
+    // 比べる相手は 1 位（真値）でも「同値」の行でもない
+    expect(DISCRIMINATION_AGAINST_ID).not.toBe(scenes.kyoto.truthId);
+    expect(DISCRIMINATION_AGAINST_ID).not.toBe(SAME_DEFINITION_ID);
+  });
+
+  it('真値と同じ定義の候補の行に「同値」が付き、真値の行は「真値」、別定義の行には付かない', async () => {
+    const demo = initDemo({ engine: makeStubEngine() });
+    await demo.whenSettled();
+
+    expect(truthMarkOf(scenes.kyoto.truthId)).toBe('真値');
+    expect(truthMarkOf(SAME_DEFINITION_ID)).toBe('同値');
+    expect(truthMarkOf(DISCRIMINATION_AGAINST_ID)).toBe('');
+  });
+
+  it('推定が失敗したとき、流れの行が「失敗: <理由>（N 件）」になる', async () => {
+    const demo = initDemo({ engine: makeFailingEngine() });
+    await demo.whenSettled();
+
+    const scene = demo.getState().scene;
+    expect(scene.status).toBe('failed');
+    expect(scene.failure).not.toBeNull();
+    const expected = expectedFlowFor('zones', scenes.kyoto);
+    expect(flowText()).toBe(`失敗: ${scene.failure.reason}（${expected.candidates} 件）`);
+  });
+
+  it('東京のプリセットでは、真値の投影に東京の場面が渡る', async () => {
+    const engine = makeStubEngine();
+    const demo = initDemo({ engine });
+    await demo.whenSettled();
+
+    const button = document.querySelector('button[data-preset="place:b"]') as HTMLButtonElement;
+    button.dispatchEvent(new Event('click'));
+    await demo.whenSettled();
+
+    const calls = engine.projectTruth.mock.calls;
+    const lastCall = calls[calls.length - 1];
+    expect(lastCall?.[1]).toBe(scenes.tokyo);
+    expect(lastCall?.[1]?.id).toBe(scenes.tokyo.id);
+  });
+});
+
+describe('いまの場面の名前を結果の件数の行に出す', () => {
+  beforeEach(() => {
+    mountPage();
+  });
+
+  async function press(presetId: string, optionId: string, demo: ReturnType<typeof initDemo>) {
+    const button = document.querySelector(`button[data-preset="${presetId}:${optionId}"]`) as HTMLButtonElement;
+    button.dispatchEvent(new Event('click'));
+    await demo.whenSettled();
+  }
+
+  it('東京のプリセットで東京、つまみを触って中立に戻っても東京のまま、京都のプリセットで京都になる', async () => {
+    const demo = initDemo({ engine: makeStubEngine() });
+    await demo.whenSettled();
+    expect(resultCountText()).toContain(`${scenes.kyoto.label}・候補`);
+
+    await press('place', 'b', demo);
+    expect(resultCountText()).toContain(`${scenes.tokyo.label}・候補`);
+
+    // つまみを触るとプリセットの印は消えて中立に戻るが、場面は東京のまま
+    const checkbox = document.getElementById('y-flip') as HTMLInputElement;
+    checkbox.checked = true;
+    checkbox.dispatchEvent(new Event('change'));
+    await demo.whenSettled();
+    expect(pressedPresets()).toEqual([]);
+    expect(resultCountText()).toContain(`${scenes.tokyo.label}・候補`);
+
+    await press('place', 'a', demo);
+    expect(resultCountText()).toContain(`${scenes.kyoto.label}・候補`);
   });
 });
 
