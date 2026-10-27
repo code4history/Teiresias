@@ -46,7 +46,8 @@ const result: EstimationResult = await estimateCrs(gcps, candidates, {
   つないで 1 回で変換する）。空配列は省略と同じ。
 - `timeoutMs` は候補 1 件の **transformer の呼び出し 1 回**の上限。その内に答えなければ、推定を
   その場で止め、`status: 'failed'`・`failure.reason: 'timeout'` を返す（残りの候補は呼ばない）。
-  正の数でない値は既定に戻す。Promise を返して待たせる transformer の上限であり、同期で処理を
+  正の数でない値は既定に戻す。2147483647（`setTimeout` が受けられる遅延の上限）を越える値は
+  `Infinity`（上限なし）として扱う。Promise を返して待たせる transformer の上限であり、同期で処理を
   握り続ける transformer は打ち切れない。
 - `signal` が中止されたら、`estimateCrs` は `signal.reason`（無ければ `AbortError` の
   `DOMException`）で reject する（`AbortSignal` を受ける Web の API の慣例）。次の候補は呼ばない。

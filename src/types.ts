@@ -79,7 +79,8 @@ export interface EstimateOptions {
   holdout?: readonly GcpPair[];
   /**
    * 候補 1 件の transformer の呼び出しの上限（ms）。既定 120000。`Infinity` で無効。
-   * 正の数でない値・非数は既定へ正規化する。
+   * 正の数でない値・非数は既定へ正規化する。2147483647（`setTimeout` が受けられる遅延の上限）を
+   * 越える値は `Infinity`（上限なし）として扱う。
    *
    * 上限を越えたらその場で推定を止め、`status: 'failed'`（`failure.reason: 'timeout'`）を返す。
    * Promise を返して待たせる transformer の上限であり、同期で処理を握り続ける transformer は

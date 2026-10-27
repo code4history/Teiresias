@@ -48,8 +48,9 @@ const result: EstimationResult = await estimateCrs(gcps, candidates, {
 - `timeoutMs` is the upper limit of **one transformer call** for one candidate. When a call does not
   answer within it, the estimate stops there and returns `status: 'failed'` with
   `failure.reason: 'timeout'`; the remaining candidates are not called. A value that is not a positive
-  number falls back to the default. It bounds a transformer that returns a Promise and keeps it
-  pending; a transformer that blocks the thread synchronously cannot be interrupted.
+  number falls back to the default. A value larger than 2147483647 (the largest delay `setTimeout`
+  accepts) is treated as `Infinity`, that is, no limit. It bounds a transformer that returns a Promise
+  and keeps it pending; a transformer that blocks the thread synchronously cannot be interrupted.
 - `signal`: when it is aborted, `estimateCrs` rejects with `signal.reason` (or an `AbortError`
   `DOMException` when there is no reason), following the convention of Web APIs that take an
   `AbortSignal`. No further candidate is called. Cancellation is the only case in which

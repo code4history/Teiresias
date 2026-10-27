@@ -82,13 +82,18 @@ export function normalizePositiveInteger(value: number | undefined, fallback: nu
   return value;
 }
 
+/** `setTimeout` が受けられる遅延の上限（2^31 − 1 ms）。越えると 1 ms へ置き換えられる。 */
+const MAX_TIMER_DELAY_MS = 2_147_483_647;
+
 /**
  * 正の有限値と `Infinity` だけを受理し、それ以外（0 以下・非数・undefined）は既定 120000 ms へ落とす。
+ * `setTimeout` の上限を越える値は、即座の打ち切りにならないよう `Infinity`（打ち切りなし）として扱う。
  * 内部 helper の一覧（tests/package-shape.test.ts）を増やさないため export しない。
  */
 function normalizeTimeoutMs(value: number | undefined): number {
   if (value === Number.POSITIVE_INFINITY) return value;
   if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0) return DEFAULT_TIMEOUT_MS;
+  if (value > MAX_TIMER_DELAY_MS) return Number.POSITIVE_INFINITY;
   return value;
 }
 
@@ -330,8 +335,12 @@ async function invokeTransformer(
   } catch (error) {
     return { kind: 'thrown', error };
   }
-  // 同期の transformer の中で中止された場合も、次へ進まずに reject する
-  if (signal?.aborted) throw abortReason(signal);
+  // 同期の transformer の中で中止された場合も、次へ進まずに reject する。
+  // 捨てる promise が後で reject しても未処理にならないよう、先に handler を付けておく
+  if (signal?.aborted) {
+    call.catch(() => {});
+    throw abortReason(signal);
+  }
 
   const contenders: Array<Promise<TransformerOutcome>> = [
     call.then(
