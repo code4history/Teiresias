@@ -11,6 +11,17 @@
 
 English README is [here](./README.md).
 
+## インストール
+
+Node.js >= 22（またはバンドラ経由のブラウザ）が必要です。候補はふつう
+[`@c4h/atlas`](https://github.com/code4history/Atlas) から取ります（下の「Atlas と組み合わせる」を参照）。
+
+<!-- release-pinned:start -->
+```sh
+pnpm add @c4h/teiresias @c4h/atlas
+```
+<!-- release-pinned:end -->
+
 ## 公開 API
 
 `package.json` の `exports` は public root `"."` のみである。公開されるのは `estimateCrs` と
@@ -229,18 +240,30 @@ final RMS を別名で公開する API は無い。
 
 ## 開発
 
+[Atlas](https://github.com/code4history/Atlas) と [Daedalus](https://github.com/code4history/Daedalus)
+をこのリポジトリと同じ階層に置く（`../Atlas`・`../Daedalus`）。npm に出るまでは、
+`ci/pnpm-workspace.ci.yaml` が `@c4h/atlas` と `@c4h/daedalus` をその checkout へ向ける。install の前に、
+このリポジトリと兄弟のそれぞれで写しておくこと（写したものは commit しない）。
+
 ```bash
-pnpm --ignore-workspace install --ignore-scripts
-pnpm --ignore-workspace run typecheck
-pnpm --ignore-workspace run test:types
-pnpm --ignore-workspace run test
-pnpm --ignore-workspace run build
-pnpm --ignore-workspace run coverage
+(cd ../Daedalus && cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml && pnpm install --frozen-lockfile && pnpm run build)
+(cd ../Atlas && cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml && pnpm install --frozen-lockfile && pnpm run build)
+cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml && pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm run test:types
+pnpm run test
+pnpm run build
+pnpm run smoke:consumer
+pnpm run coverage
 ```
 
 `@c4h/daedalus` は `dist` を exports 経由で解決するため、先に Daedalus を build しておくこと。
-親リポジトリの worktree では、素の `pnpm run <script>` が親の `pnpm-lock.yaml` を縮退再生成する
-ため、**必ず `--ignore-workspace` を付ける**こと。
+`pnpm run smoke:consumer` は 3 つのパッケージを pack し、空のディレクトリに tarball を入れて、
+公開面の import だけで推定を流す。
+
+`pnpm publish` の前に `prepublishOnly`（test・typecheck・test:types・test:types:atlas・build・
+verify:demo・verify:demo-bundle）が走る。公開は GitHub Actions（`.github/workflows/publish.yml`）
+から行う。変更の記録は [CHANGELOG.md](./CHANGELOG.md) にある。
 
 ### デモ
 
@@ -250,15 +273,15 @@ pnpm --ignore-workspace run coverage
 
 ```bash
 # 開発サーバ
-pnpm --ignore-workspace run dev
+pnpm run dev
 
 # Pages 成果物のビルドと検証（GITHUB_PAGES=true で base が /Teiresias/ になる）
-pnpm --ignore-workspace run verify:demo
-pnpm --ignore-workspace run verify:demo-bundle
+pnpm run verify:demo
+pnpm run verify:demo-bundle
 
 # 手元のブラウザで確認する（base が "/" のビルドと対で使う）
-pnpm --ignore-workspace run build:demo
-pnpm --ignore-workspace run preview
+pnpm run build:demo
+pnpm run preview
 ```
 
 proj-wasm は Worker と WASM を読むため、**`file://` では動かない**（HTTP で配信すること）。
