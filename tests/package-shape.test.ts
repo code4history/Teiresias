@@ -92,6 +92,47 @@ function sha256OfFile(path: string): string {
   return createHash('sha256').update(readFileSync(path)).digest('hex');
 }
 
+/** `"x"` / `'x'` / `x` のどれも同じ値として読む。 */
+function unquoteYamlScalar(token: string): string {
+  if (token.length >= 2) {
+    const first = token[0];
+    const last = token[token.length - 1];
+    if ((first === '"' && last === '"') || (first === "'" && last === "'")) return token.slice(1, -1);
+  }
+  return token;
+}
+
+/**
+ * `overrides` ブロックのキーと値を読む。
+ *
+ * 引用符あり（ダブル・シングル）・なしのどれでも読む。ブロックの中の、コメントでも
+ * 空行でもない行が読めなければ throw する（読めない行を黙って飛ばさない）。
+ * 別のトップレベルキーが来たらブロックは終わる。
+ */
+function readOverrides(yaml: string): Record<string, string> {
+  const overrides: Record<string, string> = {};
+  let inBlock = false;
+  for (const line of yaml.split('\n')) {
+    if (/^overrides:\s*$/.test(line)) {
+      inBlock = true;
+      continue;
+    }
+    if (!inBlock) continue;
+    const trimmed = line.trim();
+    if (trimmed === '' || trimmed.startsWith('#')) continue;
+    if (!/^\s/.test(line)) {
+      inBlock = false;
+      continue;
+    }
+    const match = /^\s+(?:"([^"]*)"|'([^']*)'|([^"'\s:#][^:#]*?))\s*:\s*(?:"([^"]*)"|'([^']*)'|([^"'\s#]+))\s*(?:#.*)?$/.exec(line);
+    if (match === null) throw new Error(`overrides の行を読めない: ${trimmed}`);
+    const key = unquoteYamlScalar(match[1] ?? match[2] ?? match[3]);
+    const value = unquoteYamlScalar(match[4] ?? match[5] ?? match[6]);
+    overrides[key] = value;
+  }
+  return overrides;
+}
+
 describe('AC-m1-1: runtime dependency と公開 surface', () => {
   it('@c4h/daedalus は npm の初版の範囲で、依存の欄に link: / file: / workspace: が無い', () => {
     expect(packageJson.dependencies['@c4h/daedalus']).toMatch(FIRST_RELEASE_RANGE);
@@ -106,15 +147,7 @@ describe('AC-m1-1: runtime dependency と公開 surface', () => {
   it('ci/pnpm-workspace.ci.yaml の @c4h/* の override は兄弟の link: だけ（無くてもよい）', () => {
     const ciPath = join(packageRoot, 'ci', 'pnpm-workspace.ci.yaml');
     expect(existsSync(ciPath)).toBe(true);
-    const overrides: Record<string, string> = {};
-    let inBlock = false;
-    for (const line of readFileSync(ciPath, 'utf8').split('\n')) {
-      if (/^overrides:\s*$/.test(line)) { inBlock = true; continue; }
-      if (!inBlock) continue;
-      if (line.trim() !== '' && !/^[\s#]/.test(line)) { inBlock = false; continue; }
-      const m = line.match(/^\s+"?([^"\s:#][^"\s:]*)"?:\s*"([^"]+)"/);
-      if (m) overrides[m[1]] = m[2];
-    }
+    const overrides = readOverrides(readFileSync(ciPath, 'utf8'));
     const allowed: Record<string, string> = {
       '@c4h/daedalus': 'link:../Daedalus',
       '@c4h/atlas': 'link:../Atlas',
@@ -208,6 +241,46 @@ describe('AC-m1-1: runtime dependency と公開 surface', () => {
 
     await expect(import(`${DAEDALUS_PKG}/${'testkit'}`)).rejects.toThrowError();
     await expect(import(`${DAEDALUS_PKG}/${'dist'}/index.js`)).rejects.toThrowError();
+  });
+});
+
+/**
+ * `overrides` ブロックの読み取り。
+ *
+ * キーと値は引用符あり（ダブル・シングル）・なしのどれでも読む。ブロックの中の
+ * コメントでも空行でもない行が読めなければ throw する（黙って飛ばさない）。
+ */
+describe('overrides の読み取り', () => {
+  it('引用符あり・なし（ダブル・シングル・なし）を読む', () => {
+    const yaml = [
+      'overrides:',
+      '  "@c4h/daedalus": "link:../Daedalus"',
+      "  '@c4h/atlas': 'link:../Atlas'",
+      '  plain: link:../Plain',
+      '  "@c4h/mixed": link:../Mixed',
+      '# a comment does not end the block',
+      '',
+      'minimumReleaseAgeExclude:',
+      '  - "@c4h/*"',
+      '',
+    ].join('\n');
+    expect(readOverrides(yaml)).toEqual({
+      '@c4h/daedalus': 'link:../Daedalus',
+      '@c4h/atlas': 'link:../Atlas',
+      plain: 'link:../Plain',
+      '@c4h/mixed': 'link:../Mixed',
+    });
+  });
+
+  it('引用符なしの link:../Wrong も読み取り、許可リストの検査で拒否できる', () => {
+    const overrides = readOverrides('overrides:\n  "@c4h/daedalus": link:../Wrong\n');
+    expect(overrides['@c4h/daedalus']).toBe('link:../Wrong');
+    expect(overrides['@c4h/daedalus']).not.toBe('link:../Daedalus');
+  });
+
+  it('コメントでも空行でもない読めない行があれば throw する', () => {
+    expect(() => readOverrides('overrides:\n  "@c4h/daedalus" "link:../Daedalus"\n')).toThrow(/読めない/);
+    expect(() => readOverrides('overrides:\n  - "@c4h/daedalus"\n')).toThrow(/読めない/);
   });
 });
 

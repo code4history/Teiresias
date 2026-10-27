@@ -2,10 +2,14 @@
  * scripts/consumer-smoke.mjs の場面の判定を、合成した結果で両向きに確かめる。
  * 流れ自体（tarball を空のディレクトリへ入れて推定する）は CI の `pnpm run smoke:consumer` が流す。
  */
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
 import { describe, expect, it } from 'vitest';
 
 // @ts-expect-error -- 型宣言の無い .mjs を読む
-import { SCENES } from '../scripts/consumer-smoke.mjs';
+import { SCENES, TIME_LIMIT_MS, cleanupConsumerDir, pnpm, remainingMs } from '../scripts/consumer-smoke.mjs';
 
 type Row = { id: string; proj4: string };
 type Ranked = { authority: string; code: string };
@@ -43,6 +47,65 @@ const ranked = (ids: string[]): Ranked[] =>
     const [authority, code] = id.split(':');
     return { authority, code };
   });
+
+describe('consumer-smoke の打ち切りと後始末', () => {
+  it('残り時間は全体の上限から経過分を引いた値になる', () => {
+    expect(remainingMs(0, TIME_LIMIT_MS)).toBe(0);
+    expect(remainingMs(0, TIME_LIMIT_MS + 1)).toBe(-1);
+    expect(remainingMs(0, 0)).toBe(TIME_LIMIT_MS);
+  });
+
+  it('pnpm の呼び出しに残り時間を timeout として渡す（pack も install も同じ経路）', () => {
+    const calls: Array<{ file: string; args: string[]; options: { cwd: string; timeout: number } }> = [];
+    const run = (file: string, args: string[], options: { cwd: string; timeout: number }): void => {
+      calls.push({ file, args, options });
+    };
+    pnpm(['pack'], '/work/Atlas', Date.now(), run as never);
+    expect(calls).toHaveLength(1);
+    expect(calls[0].file).toBe('pnpm');
+    expect(calls[0].args).toEqual(['pack']);
+    expect(calls[0].options.cwd).toBe('/work/Atlas');
+    expect(calls[0].options.timeout).toBeGreaterThan(0);
+    expect(calls[0].options.timeout).toBeLessThanOrEqual(TIME_LIMIT_MS);
+  });
+
+  it('残り時間が無ければ pnpm を起動せずに打ち切りエラーにする', () => {
+    const run = (): void => {
+      throw new Error('must not run');
+    };
+    expect(() => pnpm(['install'], '/work/consumer', Date.now() - TIME_LIMIT_MS - 1, run as never)).toThrow(
+      /timed out after 300 s/,
+    );
+  });
+
+  it('pnpm 自身の時間切れも打ち切りと同じ扱いにする', () => {
+    const run = (): void => {
+      const error = new Error('spawnSync pnpm ETIMEDOUT') as Error & { code?: string };
+      error.code = 'ETIMEDOUT';
+      throw error;
+    };
+    expect(() => pnpm(['pack'], '/work/Atlas', Date.now(), run as never)).toThrow(/timed out after 300 s/);
+  });
+
+  it('成功したときだけ一時ディレクトリを消し、失敗したときは残す', () => {
+    const removed = mkdtempSync(join(tmpdir(), 'teiresias-consumer-test-'));
+    writeFileSync(join(removed, 'marker'), 'x');
+    cleanupConsumerDir(removed, true);
+    expect(existsSync(removed)).toBe(false);
+
+    const kept = mkdtempSync(join(tmpdir(), 'teiresias-consumer-test-'));
+    writeFileSync(join(kept, 'marker'), 'x');
+    cleanupConsumerDir(kept, false);
+    expect(existsSync(kept)).toBe(true);
+    expect(readFileSync(join(kept, 'marker'), 'utf8')).toBe('x');
+    rmSync(kept, { recursive: true, force: true });
+  });
+
+  it('本体の成功判定で後始末を呼ぶ（script 本文）', () => {
+    const source = readFileSync(new URL('../scripts/consumer-smoke.mjs', import.meta.url), 'utf8');
+    expect(source).toMatch(/cleanupConsumerDir\(dir, outcome\.ok === true\)/);
+  });
+});
 
 describe('consumer-smoke の場面', () => {
   it('(a)〜(c) は metre の真値で (a) だけ y 上向き、(d) は格子の単位の真値で y 下向き', () => {
