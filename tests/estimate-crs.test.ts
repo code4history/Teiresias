@@ -1059,6 +1059,61 @@ describe('打ち切りと中止', () => {
     }
     expect(vi.getTimerCount()).toBe(0);
   });
+
+  it('setTimeout の上限（2147483647 ms）を越える timeoutMs は打ち切りなし（Infinity）として扱う', async () => {
+    // 上限を越える遅延は setTimeout が 1 ms へ置き換えるため、そのまま渡すと即座に打ち切りになる
+    const answerLater: CandidateTransformer = (id, points, geoBasis) =>
+      new Promise((resolve) => {
+        setTimeout(() => resolve(mockTransformer(id, points, geoBasis)), 30);
+      });
+    for (const timeoutMs of [2 ** 31, 30 * 24 * 60 * 60 * 1000, Number.MAX_SAFE_INTEGER, Number.MAX_VALUE]) {
+      const result = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: answerLater, timeoutMs });
+      expect(result.failure).toBeNull();
+      expect(result.status).not.toBe('failed');
+      expect(result.selected?.identity.code).toBe('PLANE-A');
+    }
+  });
+
+  it('上限ちょうど（2147483647 ms）はそのまま上限として効く', async () => {
+    vi.useFakeTimers();
+    let settled: EstimationResult | undefined;
+    const pending = estimateCrs(teiresiasE2eGcps, idsOf(1), {
+      transformer: () => never(),
+      timeoutMs: 2_147_483_647,
+    }).then((result) => {
+      settled = result;
+    });
+    await vi.advanceTimersByTimeAsync(2_147_483_646);
+    expect(settled).toBeUndefined();
+    await vi.advanceTimersByTimeAsync(1);
+    await pending;
+    expect(settled?.failure?.reason).toBe('timeout');
+    expect(vi.getTimerCount()).toBe(0);
+  });
+
+  it('transformer の中で同期に abort され、後で reject する promise を返しても未処理の reject を出さない', async () => {
+    const unhandled: unknown[] = [];
+    const onUnhandled = (reason: unknown): void => {
+      unhandled.push(reason);
+    };
+    process.on('unhandledRejection', onUnhandled);
+    try {
+      const controller = new AbortController();
+      const transformer: CandidateTransformer = () => {
+        controller.abort();
+        return new Promise((_resolve, reject) => {
+          setTimeout(() => reject(new Error('rejected after abort')), 5);
+        });
+      };
+      await expect(
+        estimateCrs(teiresiasE2eGcps, idsOf(2), { transformer, signal: controller.signal }),
+      ).rejects.toMatchObject({ name: 'AbortError' });
+      await new Promise((resolve) => setTimeout(resolve, 30));
+      expect(unhandled).toEqual([]);
+    } finally {
+      process.off('unhandledRejection', onUnhandled);
+    }
+  });
 });
 
 // ---------------------------------------------------------------------------
