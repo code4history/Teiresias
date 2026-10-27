@@ -26,18 +26,40 @@
  */
 import * as defaultEngine from './atlas-engine.js';
 import {
-  GCP_LONLAT,
   METERS_PER_PIXEL,
-  TRUE_ID,
   applyYFlip,
   basePixelsFromProjected,
   runScene,
 } from './estimate-scene.js';
+import { PRESETS, PRESET_OPTION_IDS, findPreset } from './presets.js';
+import { DAEDALUS_DEMO_URL, DEFAULT_SCENE } from './scenes.js';
 
 const BOARD_WIDTH = 380;
 const BOARD_HEIGHT = 300;
 /** マーカーを掴んだと見なす距離（board 座標 px）。 */
 const GRAB_RADIUS = 12;
+
+/**
+ * `yScale` の符号を言葉で出すときの文言（画面とテストが同じ定数を使う）。
+ * 正の `yScale` は pixel の y が上向き、負は下向き（スキャンした地図の向き）である。
+ */
+export const Y_SCALE_SIGN_LABELS = Object.freeze({
+  positive: 'y 上向き',
+  negative: 'y 下向き',
+});
+
+/**
+ * ビルド時に焼き込む 3 つの package の版（`vite.config.ts` の `define`）。
+ * dev server と Pages のビルドで同じ値になる。素の状態（テストなど）では未定義 ∴ 表示しない。
+ */
+const VERSIONS =
+  typeof __C4H_VERSIONS__ === 'object' && __C4H_VERSIONS__ !== null ? __C4H_VERSIONS__ : null;
+
+/** フッタに出す「使っている版」の 1 行。 */
+function versionsLine(versions) {
+  if (!versions) return '';
+  return `使っている版: @c4h/atlas ${versions.atlas}・@c4h/daedalus ${versions.daedalus}・@c4h/teiresias ${versions.teiresias}`;
+}
 
 const COLOR = {
   marker: '#c0392b',
@@ -202,6 +224,10 @@ export function initDemo(config = {}) {
     status: doc.getElementById('status'),
     note: doc.getElementById('note'),
     error: doc.getElementById('error'),
+    presetBar: doc.getElementById('preset-bar'),
+    presetExpectation: doc.getElementById('preset-expectation'),
+    flow: doc.getElementById('flow'),
+    version: doc.getElementById('version'),
     yFlip: doc.getElementById('y-flip'),
     chirality: doc.getElementById('chirality'),
     candidateMode: doc.getElementById('candidate-mode'),
@@ -221,7 +247,11 @@ export function initDemo(config = {}) {
   const pixelCtx = el.pixelCanvas?.getContext ? el.pixelCanvas.getContext('2d') : null;
 
   const state = {
-    geoPoints: GCP_LONLAT.map((point) => [point[0], point[1]]),
+    // 場面（`demo/scenes.js`）。プリセットで入れ替わる。GCP は場面が持つので、ここには持たない。
+    place: DEFAULT_SCENE,
+    // 直近の計算結果（`runScene` の返り値）。
+    result: null,
+    geoPoints: DEFAULT_SCENE.gcpLonLat.map((point) => [point[0], point[1]]),
     basePixels: [],
     pixels: [],
     yFlip: false,
@@ -229,7 +259,8 @@ export function initDemo(config = {}) {
     candidateMode: 'zones',
     candidates: [],
     transformer: null,
-    scene: null,
+    /** 押されているプリセット（`"<対比の名前>:<a|b>"`）。手で触ると `null` に戻る（中立）。 */
+    activePreset: null,
     dragIndex: null,
     ready: false,
     running: false,
@@ -269,7 +300,7 @@ export function initDemo(config = {}) {
       appendCell(row, entry.id);
       appendCell(row, entry.score === null ? '—' : entry.score.toFixed(6));
       appendCell(row, formatMeters(entry.rmsMeters));
-      appendCell(row, entry.isTruth ? '真値' : '');
+      appendCell(row, entry.isTruth ? '真値' : entry.isSameDefinition ? '同値' : '');
       el.rankedBody.appendChild(row);
     }
   }
@@ -301,9 +332,24 @@ export function initDemo(config = {}) {
       for (const key of ['xScale', 'ySkew', 'xSkew', 'yScale', 'xOrigin', 'yOrigin']) {
         appendDefinition(list, key, formatMeters(worldFile[key]));
       }
+      // `yScale` の符号は「画像の y がどちら向きか」である ∴ 数に加えて言葉でも出す。
+      appendDefinition(
+        list,
+        'y の向き',
+        worldFile.yScale > 0 ? Y_SCALE_SIGN_LABELS.positive : Y_SCALE_SIGN_LABELS.negative,
+      );
     }
     appendDefinition(list, 'status', String(scene.status));
     el.selectedBody.appendChild(list);
+
+    // world file の当てはめのパネルは Daedalus のデモにある ∴ ここではそのデモへ渡す。
+    const daedalusLink = doc.createElement('a');
+    daedalusLink.className = 'teiresias-external-link';
+    daedalusLink.href = DAEDALUS_DEMO_URL;
+    daedalusLink.target = '_blank';
+    daedalusLink.rel = 'noreferrer noopener';
+    daedalusLink.textContent = 'Daedalus のデモで見る';
+    el.selectedBody.appendChild(daedalusLink);
   }
 
   function renderDiscrimination(scene) {
@@ -319,8 +365,29 @@ export function initDemo(config = {}) {
 
     const text = doc.createElement('span');
     text.className = 'teiresias-discrimination-text';
-    text.textContent = ` 識別力 rms[2位]/rms[1位] = ${formatRatio(ratio)}`;
+    text.textContent = ` 識別力 rms[比べた相手]/rms[1位] = ${formatRatio(ratio)}`;
     el.discrimination.appendChild(text);
+
+    // 比べた相手。同じ定義の候補（真値の縮退クラス）は 1 つと数えるので、2 位とは限らない。
+    if (scene.discrimination.against !== null && scene.discrimination.against !== undefined) {
+      const against = doc.createElement('span');
+      against.className = 'teiresias-discrimination-against';
+      against.textContent = ` 比べた相手: ${scene.discrimination.against}`;
+      el.discrimination.appendChild(against);
+    }
+  }
+
+  /**
+   * 流れの表示の 1 行（Atlas → Daedalus → Teiresias）。件数は実行時の値である。
+   * 推定が失敗したときは 1 位の代わりに理由と件数を出す。
+   */
+  function flowLineOf(scene, candidateCount) {
+    if (scene.status === 'failed' && scene.failure) {
+      return `失敗: ${scene.failure.reason}（${scene.failure.candidates.length} 件）`;
+    }
+    const transformed = candidateCount - scene.untransformableIds.length;
+    const top = scene.ranked[0]?.id ?? '—';
+    return `Atlas: 候補 ${candidateCount} 件 → 変換できた ${transformed} 件 → Daedalus: 当てはめ ${scene.ranked.length} 件 → Teiresias: 1 位 ${top}`;
   }
 
   function renderBoards() {
@@ -333,9 +400,12 @@ export function initDemo(config = {}) {
     renderRanked(scene);
     renderSelected(scene);
     renderDiscrimination(scene);
+    setText(el.flow, scene ? flowLineOf(scene, state.candidates.length) : '');
     setText(
       el.resultCount,
-      scene ? `候補 ${scene.ranked.length} 件（モード: ${state.candidateMode}）` : '未計算',
+      scene
+        ? `${state.place.label}・候補 ${scene.ranked.length} 件（モード: ${state.candidateMode}）`
+        : '未計算',
     );
     setText(
       el.untransformable,
@@ -368,8 +438,9 @@ export function initDemo(config = {}) {
         chirality: state.chirality,
         candidates: state.candidates,
         transformer: state.transformer,
+        scene: state.place,
       });
-      state.scene = scene;
+      state.result = scene;
       state.recalcCount += 1;
       renderScene(scene);
       renderBoards();
@@ -394,7 +465,7 @@ export function initDemo(config = {}) {
 
   async function loadCandidatesAndRecalculate() {
     try {
-      state.candidates = await engine.loadCandidates(state.candidateMode);
+      state.candidates = await engine.loadCandidates(state.candidateMode, state.place);
       state.transformer = engine.makeTransformer(state.candidates);
     } catch (error) {
       setText(el.error, error instanceof Error ? error.message : String(error));
@@ -407,6 +478,112 @@ export function initDemo(config = {}) {
   function scheduleCandidateReload() {
     state.settled = state.settled.then(() => loadCandidatesAndRecalculate());
     return state.settled;
+  }
+
+  /**
+   * 場面の入力（GCP・真値の投影座標から作る pixel 格子・候補）を読み直す。
+   * 場面が変わると GCP も pixel 格子も変わる ∴ 4 つを一度に入れ替える。
+   */
+  async function loadPlaceInputs() {
+    const place = state.place;
+    state.geoPoints = place.gcpLonLat.map((point) => [point[0], point[1]]);
+    geoMapper = makeMapper(geoBounds(state.geoPoints));
+    state.candidates = await engine.loadCandidates(state.candidateMode, place);
+    state.transformer = engine.makeTransformer(state.candidates);
+    const projected = await engine.projectTruth(state.candidates, place);
+    state.basePixels = basePixelsFromProjected(projected, METERS_PER_PIXEL);
+    state.pixels = state.basePixels.map((point) => [point[0], point[1]]);
+    pixelMapper = makeMapper(pixelBounds(state.basePixels));
+  }
+
+  async function loadPlaceAndRecalculate() {
+    try {
+      await loadPlaceInputs();
+    } catch (error) {
+      setText(el.error, error instanceof Error ? error.message : String(error));
+      setText(el.status, '候補カタログの取得に失敗しました');
+      return;
+    }
+    renderBoards();
+    await recalculate();
+  }
+
+  // -- プリセットの帯 ------------------------------------------------------
+
+  /** つまみ（チェック・選択）の表示を状態へ合わせる。プリセットを押したときに使う。 */
+  function syncControls() {
+    if (el.yFlip) el.yFlip.checked = state.yFlip;
+    if (el.chirality) el.chirality.checked = state.chirality === 'normalize';
+    if (el.candidateMode) el.candidateMode.value = state.candidateMode;
+  }
+
+  /** 押されているボタンだけに `aria-pressed="true"` を付す。 */
+  function markPressed(activeId) {
+    if (!el.presetBar) return;
+    for (const button of el.presetBar.querySelectorAll('button[data-preset]')) {
+      const pressed = button.dataset.preset === activeId;
+      button.setAttribute('aria-pressed', String(pressed));
+      button.classList.toggle('active', pressed);
+    }
+  }
+
+  /**
+   * 手で入力を変えたら中立へ戻す。押した印と「見え方」の 1 行は、いま画面に出ている入力とは
+   * もう一致しない ∴ 消す（プリセットは入口であって、操作を縛らない）。
+   */
+  function leavePreset() {
+    if (state.activePreset === null) return;
+    state.activePreset = null;
+    markPressed(null);
+    setText(el.presetExpectation, '');
+  }
+
+  /** プリセットを 1 つ適用する。入力（場面・候補の集め方・y の向き・正規化）を一度に入れ、計算は 1 回。 */
+  async function applyPreset(presetId, optionId) {
+    const option = findPreset(presetId, optionId);
+    if (option === undefined) return;
+    state.activePreset = `${presetId}:${optionId}`;
+    state.place = option.scene;
+    state.candidateMode = option.input.candidateMode;
+    state.yFlip = option.input.yFlip;
+    state.chirality = option.input.chirality;
+    syncControls();
+    markPressed(state.activePreset);
+    setText(el.presetExpectation, option.expectation);
+    await loadPlaceAndRecalculate();
+  }
+
+  function schedulePreset(presetId, optionId) {
+    state.settled = state.settled.then(() => applyPreset(presetId, optionId));
+    return state.settled;
+  }
+
+  /** 帯を組む（対比ごとに A・B の 2 つのボタン）。文言と入力は `demo/presets.js` が持つ。 */
+  function renderPresetBar() {
+    if (!el.presetBar) return;
+    clearChildren(el.presetBar);
+    for (const preset of PRESETS) {
+      const group = doc.createElement('div');
+      group.className = 'teiresias-preset-group';
+      for (const optionId of PRESET_OPTION_IDS) {
+        const option = findPreset(preset.id, optionId);
+        if (option === undefined) continue;
+        const button = doc.createElement('button');
+        button.type = 'button';
+        button.className = 'teiresias-preset-btn';
+        button.dataset.preset = `${preset.id}:${optionId}`;
+        button.textContent = option.label;
+        button.setAttribute('aria-pressed', 'false');
+        button.addEventListener('click', () => void schedulePreset(preset.id, optionId));
+        group.appendChild(button);
+      }
+      el.presetBar.appendChild(group);
+    }
+  }
+
+  /** フッタの「使っている版」。ビルド時に焼き込んだ値（dev でも同じ値）を出す。 */
+  function renderVersion() {
+    setText(el.version, versionsLine(VERSIONS));
   }
 
   // -- ドラッグ（ctx に依存しない。getBoundingClientRect と数値座標だけ） ----
@@ -458,6 +635,8 @@ export function initDemo(config = {}) {
     const [x, y] = pixelMapper.toData(boardPoint);
     // 画面上は反転後の座標を触っている ∴ 保持する値へ戻すときに反転を解く。
     state.pixels[state.dragIndex] = [x, state.yFlip ? -y : y];
+    // GCP を手で動かしたのはプリセットの入力ではない ∴ 中立へ戻す（計算は離したときに 1 回）。
+    leavePreset();
     renderBoards();
   }
 
@@ -472,17 +651,20 @@ export function initDemo(config = {}) {
 
   function bindControls() {
     el.yFlip?.addEventListener('change', () => {
+      leavePreset();
       state.yFlip = Boolean(el.yFlip.checked);
       renderBoards();
       void schedule();
     });
 
     el.chirality?.addEventListener('change', () => {
+      leavePreset();
       state.chirality = chiralityFromCheckbox(el.chirality);
       void schedule();
     });
 
     el.candidateMode?.addEventListener('change', () => {
+      leavePreset();
       state.candidateMode = el.candidateMode.value;
       void scheduleCandidateReload();
     });
@@ -501,6 +683,8 @@ export function initDemo(config = {}) {
 
   async function boot() {
     setText(el.status, '初期化中...');
+    renderPresetBar();
+    renderVersion();
     bindControls();
     renderBoards();
     try {
@@ -508,12 +692,7 @@ export function initDemo(config = {}) {
       state.candidateMode = el.candidateMode?.value ?? state.candidateMode;
       state.yFlip = Boolean(el.yFlip?.checked);
       state.chirality = chiralityFromCheckbox(el.chirality);
-      state.candidates = await engine.loadCandidates(state.candidateMode);
-      state.transformer = engine.makeTransformer(state.candidates);
-      const projected = await engine.projectTruth(state.candidates);
-      state.basePixels = basePixelsFromProjected(projected, METERS_PER_PIXEL);
-      state.pixels = state.basePixels.map((point) => [point[0], point[1]]);
-      pixelMapper = makeMapper(pixelBounds(state.basePixels));
+      await loadPlaceInputs();
       state.ready = true;
       renderBoards();
       await recalculate();
@@ -535,9 +714,11 @@ export function initDemo(config = {}) {
       pixels: state.pixels.map((point) => [point[0], point[1]]),
       basePixels: state.basePixels.map((point) => [point[0], point[1]]),
       ready: state.ready,
-      truthId: TRUE_ID,
+      sceneId: state.place.id,
+      truthId: state.place.truthId,
+      candidateCount: state.candidates.length,
       hasContext: { geo: geoCtx !== null, pixel: pixelCtx !== null },
-      scene: state.scene,
+      scene: state.result,
     }),
   };
 }

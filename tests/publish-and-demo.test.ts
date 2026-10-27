@@ -54,7 +54,9 @@ describe('publish and demo packaging', () => {
     expect(engineJs).toContain("new URL('assets/', pageRoot)");
 
     // §5.4 のモジュール分割が守られていること: DOM 結線層は engine を直接触らない。
-    expect(mainJs).not.toContain('@c4h/atlas');
+    // 禁じるのは package の import であり、フッタの版の表示で package の**名前**を文字列として
+    // 出すことは「触る」に当たらない ∴ import の形だけを見る。
+    expect(mainJs).not.toMatch(/from\s*['"]@c4h\/atlas['"]|import\s*\(\s*['"]@c4h\/atlas['"]/);
     expect(mainJs).toContain("from './atlas-engine.js'");
   });
 
@@ -117,7 +119,7 @@ describe('publish and demo packaging', () => {
     // 構成で守る（設計 §5.4(2)）。ここが唯一の防壁である。
     const demoDir = join(packageRoot, 'demo');
     const scripts = readdirSync(demoDir).filter((name) => name.endsWith('.js')).sort();
-    expect(scripts).toEqual(['atlas-engine.js', 'estimate-scene.js', 'main.js']);
+    expect(scripts).toEqual(['atlas-engine.js', 'estimate-scene.js', 'main.js', 'presets.js', 'scenes.js']);
 
     const sinks = ['innerHTML', 'outerHTML', 'insertAdjacentHTML'];
     const hits: string[] = [];

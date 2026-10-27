@@ -9,24 +9,24 @@
  * 契約を再定義しない。
  */
 import { estimateCrs } from '../src/index.ts';
+import { DEFAULT_SCENE } from './scenes.js';
 
-/** 京都近郊の探索 extent（`tests/estimate-crs.real-engine.e2e.test.ts` と同一）。 */
-export const KYOTO_EXTENT = Object.freeze({ west: 135.6, south: 34.9, east: 135.9, north: 35.1 });
+/**
+ * 京都近郊の探索 extent。
+ *
+ * 値は `demo/scenes.js` の `kyoto` が持つ（場面の値の置き場はそこだけである）。名前は
+ * 既存の呼び出しのために残す。
+ */
+export const KYOTO_EXTENT = DEFAULT_SCENE.extent;
 
-/** GCP の地理座標 5 点（lon/lat 度・lon-lat 順。E2E と同一）。 */
-export const GCP_LONLAT = Object.freeze([
-  Object.freeze([135.6, 34.9]),
-  Object.freeze([135.9, 34.9]),
-  Object.freeze([135.9, 35.1]),
-  Object.freeze([135.6, 35.1]),
-  Object.freeze([135.75, 35.0]),
-]);
+/** 京都の GCP の地理座標 5 点（lon/lat 度・lon-lat 順）。値は `demo/scenes.js` が持つ。 */
+export const GCP_LONLAT = DEFAULT_SCENE.gcpLonLat;
 
 /** pixel 格子のスケール（m/pixel。E2E と同一）。 */
 export const METERS_PER_PIXEL = 10;
 
-/** 真値 CRS（平面直角座標系 VI 系）。 */
-export const TRUE_ID = 'EPSG:6674';
+/** 既定の場面（京都）の真値 CRS（平面直角座標系 VI 系）。値は `demo/scenes.js` が持つ。 */
+export const TRUE_ID = DEFAULT_SCENE.truthId;
 
 /**
  * 「識別力が潰れている」の表示閾値（設計 K7）。
@@ -68,30 +68,78 @@ export function toGcpPairs(pixels, geoPoints) {
   }));
 }
 
+/** 順位の行の ID（`${authority}:${code}`。`id` をそのまま持つ行にも対応する）。 */
+function identityOf(entry) {
+  if (entry?.id !== undefined) return entry.id;
+  if (entry?.authority === undefined || entry?.code === undefined) return undefined;
+  return `${entry.authority}:${entry.code}`;
+}
+
 /**
- * 識別力（1 位と 2 位の RMS 比）。
+ * 候補の定義（`proj4` の文字列）。分からなければ `null`。
  *
- * - `ratio = ranked[1].rmsMeters / ranked[0].rmsMeters`
- * - `ranked[0].rmsMeters === 0` なら `ratio = Infinity`（厳密適合。0 除算を作らない）
- * - `ranked.length < 2` なら `ratio = null` / `collapsed = null`（判定不能を偽で表さない）
+ * `proj4ById`（`${authority}:${code}` → `proj4`）に無い候補・`proj4` が文字列でない候補は
+ * **定義が分からない** ∴ 呼出側は「違う定義」として扱う。
  */
-export function discriminationOf(ranked) {
+function definitionOf(entry, proj4ById) {
+  if (!(proj4ById instanceof Map)) return null;
+  const proj4 = proj4ById.get(identityOf(entry));
+  return typeof proj4 === 'string' ? proj4 : null;
+}
+
+/**
+ * 識別力（1 位と、1 位と**定義が違う**最初の候補との RMS 比）。
+ *
+ * - 比べる相手は、`proj4ById` を渡したときは「1 位と `proj4` が等しくない最初の行」、
+ *   渡さないときは 2 位である。真値が縮退している（同じ定義の候補が並ぶ）とき、2 位との比は
+ *   1 に近づき「潰れている」と誤って出る ∴ 定義の違う最初の行と比べる。
+ * - `ratio = 比べた相手の rmsMeters / ranked[0].rmsMeters`
+ * - `ranked[0].rmsMeters === 0` なら `ratio = Infinity`（厳密適合。0 除算を作らない）
+ * - 比べる相手が無い（`ranked.length < 2`・全件が同じ定義）なら
+ *   `ratio = null` / `collapsed = null` / `against = null`（判定不能を偽で表さない）
+ * - `against` は比べた相手の ID（画面に「比べた相手」として出す）
+ */
+export function discriminationOf(ranked, proj4ById) {
   if (!Array.isArray(ranked) || ranked.length < 2) {
     return {
       ratio: null,
       top1Rms: ranked?.[0]?.rmsMeters ?? null,
       top2Rms: null,
       collapsed: null,
+      against: null,
     };
   }
+
   const top1Rms = ranked[0].rmsMeters;
-  const top2Rms = ranked[1].rmsMeters;
+  let compared = ranked[1];
+  if (proj4ById instanceof Map) {
+    const topDefinition = definitionOf(ranked[0], proj4ById);
+    const different = ranked
+      .slice(1)
+      .find((entry) => {
+        const definition = definitionOf(entry, proj4ById);
+        return topDefinition === null || definition === null || definition !== topDefinition;
+      });
+    if (different === undefined) {
+      return {
+        ratio: null,
+        top1Rms,
+        top2Rms: null,
+        collapsed: null,
+        against: null,
+      };
+    }
+    compared = different;
+  }
+
+  const top2Rms = compared.rmsMeters;
   const ratio = top1Rms === 0 ? Infinity : top2Rms / top1Rms;
   return {
     ratio,
     top1Rms,
     top2Rms,
     collapsed: ratio < COLLAPSE_THRESHOLD,
+    against: identityOf(compared) ?? null,
   };
 }
 
@@ -101,9 +149,20 @@ export function discriminationOf(ranked) {
  * `yFlip` は**ここで**適用する（呼出側は反転前の pixel を持ち続ける）。
  * `chirality` は `estimateCrs` の同名 option へそのまま渡す（省略時は `estimateCrs` の既定 =
  * 正規化あり）。デモ側で別の推定を書かず、同じ `estimateCrs` で「正規化あり／なし」を出す。
- * 返り値の `ranked` は各行に `id`（`${authority}:${code}`）と `isTruth` を付す。
+ * `scene` は場面（省略時は京都）。返り値の `ranked` は各行に `id`（`${authority}:${code}`）・
+ * `isTruth`（場面の `truthId` と一致）・`isSameDefinition`（真値と `proj4` が同じ = 同値）を付す。
+ * 識別力の比べる相手は、候補の行の `proj4` から作った `proj4ById` で決める。
  */
-export async function runScene({ pixels, geoPoints, yFlip, chirality, candidates, transformer, options }) {
+export async function runScene({
+  pixels,
+  geoPoints,
+  yFlip,
+  chirality,
+  candidates,
+  transformer,
+  options,
+  scene = DEFAULT_SCENE,
+}) {
   const effectivePixels = applyYFlip(pixels, yFlip);
   const gcpPairs = toGcpPairs(effectivePixels, geoPoints);
   const result = await estimateCrs(gcpPairs, candidates, {
@@ -112,8 +171,19 @@ export async function runScene({ pixels, geoPoints, yFlip, chirality, candidates
     ...(options ?? {}),
   });
 
+  // 候補の定義（`proj4`）の表。`proj4` を持たない行は入れない ∴ その候補は「定義が分からない」
+  // として扱われる（第 2 引数を渡さないときと同じ比になる）。
+  const proj4ById = new Map();
+  for (const row of candidates ?? []) {
+    if (row && typeof row.id === 'string' && typeof row.proj4 === 'string') {
+      proj4ById.set(row.id, row.proj4);
+    }
+  }
+  const truthDefinition = proj4ById.get(scene.truthId) ?? null;
+
   const ranked = result.ranked.map((entry, index) => {
     const id = `${entry.authority}:${entry.code}`;
+    const definition = proj4ById.get(id) ?? null;
     return {
       rank: index + 1,
       id,
@@ -121,7 +191,10 @@ export async function runScene({ pixels, geoPoints, yFlip, chirality, candidates
       code: entry.code,
       score: entry.score,
       rmsMeters: entry.rmsMeters,
-      isTruth: id === TRUE_ID,
+      isTruth: id === scene.truthId,
+      // 「同値」= 真値と定義（`proj4`）が同じ候補。両方の `proj4` が分かるときだけ印を付ける。
+      isSameDefinition:
+        id !== scene.truthId && definition !== null && truthDefinition !== null && definition === truthDefinition,
     };
   });
 
@@ -131,7 +204,9 @@ export async function runScene({ pixels, geoPoints, yFlip, chirality, candidates
     selected: result.selected,
     warnings: result.warnings,
     untransformableIds: result.untransformableIds,
-    discrimination: discriminationOf(result.ranked),
+    failure: result.failure ?? null,
+    discrimination: discriminationOf(result.ranked, proj4ById),
     effectivePixels,
+    scene,
   };
 }

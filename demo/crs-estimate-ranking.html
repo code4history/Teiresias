@@ -34,6 +34,11 @@
     <span id="status" class="c4h-status">初期化中...</span>
   </header>
 
+  <section class="teiresias-preset-section">
+    <div id="preset-bar" class="teiresias-preset-bar"></div>
+    <p class="teiresias-expectation"><strong>見え方:</strong> <span id="preset-expectation"></span></p>
+  </section>
+
   <div class="c4h-instructions">
     操作: pixel 板のマーカーをドラッグすると GCP が動きます。「反射を吸収する」を外して y 軸を反転すると候補間の識別力が落ちます。
   </div>
@@ -57,6 +62,7 @@
   </div>
 
   <div id="discrimination" class="c4h-legend"></div>
+  <p id="flow" class="teiresias-flow"></p>
 
   <div class="teiresias-results-grid">
     <section class="c4h-card">
@@ -101,11 +107,14 @@
       同じ CRS が上位に来て、選ばれた world file の <code>yScale</code> の符号だけが向きに応じて分かれる。
     </p>
     <p>
-      識別力は <code>rms[2位] / rms[1位]</code> で表示している。反射なしでは真値が厳密適合するため
+      識別力は <code>rms[比べた相手] / rms[1位]</code> で表示している。比べた相手は、1 位と定義（proj4）が違う最初の候補である
+      （同じ定義の候補はまとめて 1 つと数える）。反射なしでは真値が厳密適合するため
       比が巨大になり、正規化なしの反射ありでは 1.0 付近へ落ちる。候補を
       <code>catalog</code>（既定カタログ全件）にすると、正規化なしの反射ありでは真値が 1 位から転落する様子も見える。
     </p>
   </div>
+
+  <footer id="version" class="teiresias-version"></footer>
 
   <script type="module" src="./main.js"></script>
 </body>
