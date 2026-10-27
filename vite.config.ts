@@ -18,6 +18,7 @@
  * - `data/crs/custom-projections.json` は複製しない（本デモは custom projection を使わない）。
  */
 import { defineConfig } from "vite";
+import { existsSync, readFileSync } from "node:fs";
 import { copyFile, mkdir, readFile } from "node:fs/promises";
 import { createRequire } from "node:module";
 import { basename, dirname, extname, join, resolve } from "node:path";
@@ -26,6 +27,38 @@ import process from "node:process";
 const isPagesBuild = process.env.GITHUB_PAGES === "true";
 const require = createRequire(import.meta.url);
 const projWasmDist = dirname(require.resolve("proj-wasm"));
+
+/**
+ * 3 つの package の版（フッタの「使っている版」に出す）。
+ *
+ * package.json は `dist-demo` に入らない ∴ 実行時に読むのではなく、build のときに焼き込む
+ * （`define` の `__C4H_VERSIONS__`）。`pnpm run dev` も同じ設定を通る ∴ dev と Pages で
+ * 同じ値が出る。
+ */
+function manifestVersion(packageRoot: string): string {
+  const manifest = JSON.parse(readFileSync(join(packageRoot, "package.json"), "utf8")) as {
+    version: string;
+  };
+  return manifest.version;
+}
+
+/**
+ * 依存 package の root。`require.resolve` は export の条件（import のみ）で解けないことがある ∴
+ * `node_modules` の下を直接見る（link はそのまま辿る）。
+ */
+function installedPackageRoot(name: string): string {
+  const directory = resolve(__dirname, "node_modules", name);
+  if (!existsSync(join(directory, "package.json"))) {
+    throw new Error(`cannot find the package.json of ${name} (install it first)`);
+  }
+  return directory;
+}
+
+const C4H_VERSIONS = {
+  atlas: manifestVersion(installedPackageRoot("@c4h/atlas")),
+  daedalus: manifestVersion(installedPackageRoot("@c4h/daedalus")),
+  teiresias: manifestVersion(__dirname),
+};
 
 export const PROJ_WASM_RUNTIME_ASSETS = [
   "proj.db",
@@ -122,6 +155,10 @@ const aliasProjWasmBrowserRuntime = () => ({
 
 export default defineConfig({
   base: isPagesBuild ? "/Teiresias/" : "/",
+  // フッタの「使っている版」。build と dev server の両方がこの設定を通る。
+  define: {
+    __C4H_VERSIONS__: JSON.stringify(C4H_VERSIONS),
+  },
   build: {
     outDir: "dist-demo",
     copyPublicDir: false,

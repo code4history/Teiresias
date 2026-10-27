@@ -81,4 +81,32 @@ for (const file of textFiles) {
   }
 }
 
+/**
+ * 版の表示: 画面のフッタに出す 3 つの package の版が、ビルドした JS に焼き込まれていること。
+ *
+ * 版は `vite.config.ts` の `define` が package.json から読んで焼く。dev server も同じ設定を
+ * 通る ∴ 手元と Pages で同じ値が出る。package.json は dist-demo に入らない ∴ 実行時に読む形に
+ * しない（読めない場所で版が消える）。ここでは焼き込まれた**値**と、その行に出す**名前**の
+ * 両方が成果物の JS に在ることを見る（3 つの版が同じ値でも検査が空振りしない）。
+ */
+const versionManifests = [
+  { name: "@c4h/atlas", manifest: new URL("../node_modules/@c4h/atlas/package.json", import.meta.url) },
+  { name: "@c4h/daedalus", manifest: new URL("../node_modules/@c4h/daedalus/package.json", import.meta.url) },
+  { name: "@c4h/teiresias", manifest: new URL("../package.json", import.meta.url) },
+];
+
+const scriptText = (
+  await Promise.all(textFiles.filter((file) => /\.(?:js|mjs)$/.test(file)).map((file) => readText(file)))
+).join("\n");
+
+for (const { name, manifest } of versionManifests) {
+  const { version } = JSON.parse(await readFile(manifest, "utf8"));
+  if (!scriptText.includes(version)) {
+    throw new Error(`built JS does not carry the version of ${name} (${version})`);
+  }
+  if (!scriptText.includes(name)) {
+    throw new Error(`built JS does not name ${name} in the version line`);
+  }
+}
+
 console.log("dist-demo Pages artifact verified.");

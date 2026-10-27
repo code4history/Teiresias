@@ -340,6 +340,23 @@ pnpm run build:demo
 pnpm run preview
 ```
 
+The page has a **row of preset buttons** at the top — one pair per contrast. Pressing one fills in the
+whole input (place, how candidates are collected, y direction, normalization) and runs the estimate
+once. The pressed button stays highlighted and the line underneath it says what the output should look
+like. Touching a control or dragging a GCP by hand clears the highlight and the line (the presets are an
+entry point; they do not lock the controls). The labels on screen are shown in Japanese.
+
+| preset | A | B |
+|---|---|---|
+| `place` | 京都の GCP | 東京の GCP |
+| `y-direction` | y 上向き | y 下向き（走査した地図） |
+| `normalization` | 正規化あり | 正規化なし |
+
+Above the ranking the page shows a one-line flow (`Atlas` → `Daedalus` → `Teiresias` with the live
+counts and the winning CRS), the discrimination badge next to the candidate it was compared with, and
+the selected world file with the sign of `yScale` spelled out as y up / y down. The world-file panel
+itself lives in the Daedalus demo, so the selection links to it.
+
 Because proj-wasm loads a Worker and a WASM binary, **it does not work over `file://`** (serve it over HTTP).
 
 ## License
