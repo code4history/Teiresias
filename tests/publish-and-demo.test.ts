@@ -49,12 +49,20 @@ describe('publish and demo packaging', () => {
     expect(engineJs).toContain('initializeProjWasmRuntime');
     expect(engineJs).toContain('listProjectedCrsFromProjWasm');
     expect(engineJs).toContain('transformLonLatArrayToProjected');
+    // transformer はローカルに組まず、Atlas の公開 adapter で作る
+    expect(engineJs).toContain('createCandidateTransformer');
     expect(engineJs).toContain('projWasmAssetBaseUrl');
     expect(engineJs).toContain("new URL('assets/', pageRoot)");
 
     // §5.4 のモジュール分割が守られていること: DOM 結線層は engine を直接触らない。
     expect(mainJs).not.toContain('@c4h/atlas');
     expect(mainJs).toContain("from './atlas-engine.js'");
+  });
+
+  it('the real-engine E2E builds its transformer with the public Atlas adapter', async () => {
+    const e2e = await readText('tests', 'estimate-crs.real-engine.e2e.test.ts');
+    expect(e2e).toContain('createCandidateTransformer');
+    expect(e2e).not.toContain('function makeTransformer');
   });
 
   it('uses the C4H demo boilerplate shell', async () => {

@@ -65,6 +65,44 @@ Teiresias always passes `{ kind: 'planar_xy', axisOrder: 'xy', unit: 'm' }` to D
 forward the input-side `geoBasis` as-is. Handling of candidates whose native unit is not the metre does
 not exist in the current API.
 
+### Using with Atlas
+
+[`@c4h/atlas`](https://github.com/code4history/Atlas) finds the candidates and builds the transformer
+with three functions. Teiresias itself does not depend on Atlas (the engine is injected by the
+caller); `createCandidateTransformer` returns a function of the same shape as `CandidateTransformer`,
+and the rows of `listProjectedCrsFromProjWasm` already carry `authority` / `code`, so they can be
+passed as the candidates as they are.
+
+```ts
+import {
+  createCandidateTransformer,
+  initializeProjWasmRuntime,
+  listProjectedCrsFromProjWasm,
+} from '@c4h/atlas';
+import { estimateCrs } from '@c4h/teiresias';
+
+await initializeProjWasmRuntime(); // in a browser, pass { projWasmAssetBaseUrl } as well
+
+const rows = await listProjectedCrsFromProjWasm({
+  extent: { west: 135.6, south: 34.9, east: 135.9, north: 35.1 },
+  area: 'Japan',
+  onshoreOnly: true,
+});
+
+const result = await estimateCrs(gcps, rows, {
+  transformer: createCandidateTransformer(rows),
+});
+```
+
+The transformer gives `null` for a `geoBasis` other than `{ kind: 'lonlat_deg', axisOrder: 'lon-lat' }`
+and for an id that is not among the rows, which is contract (7) "untransformable in the domain sense".
+A failure on the Atlas side is thrown, not turned into `null`. Teiresias catches a throw or a reject
+per candidate: it records that candidate as an adapter bug, puts its id in `untransformableIds` and
+goes on with the remaining candidates, so `estimateCrs` itself does not reject. When no candidate is
+usable and at least one of them failed this way, the status is `failed` (see "Status and
+diagnostics" below). The real-engine E2E (`tests/estimate-crs.real-engine.e2e.test.ts`)
+and the demo (`demo/atlas-engine.js`) are wired this way.
+
 ## Ranking and score
 
 - The order is decided by the **basic (similarity) RMS before shear**. Since Daedalus may finally adopt

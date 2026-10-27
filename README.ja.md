@@ -62,6 +62,41 @@ transformer の成功出力を **metre の projected `[E, N]`** と解釈する�
 Daedalus へ常に `{ kind: 'planar_xy', axisOrder: 'xy', unit: 'm' }` を渡し、入力側 `geoBasis` を
 そのまま横流ししない。native 単位が metre でない候補の扱いは現在の API に存在しない。
 
+### Atlas と組み合わせる
+
+[`@c4h/atlas`](https://github.com/code4history/Atlas) の 3 つの関数で候補と transformer を作る。
+Teiresias 自身は Atlas に依存しない（engine は呼出側が注入する）。`createCandidateTransformer` は
+`CandidateTransformer` と同じ形の関数を返し、`listProjectedCrsFromProjWasm` の行は
+`authority` / `code` を持つので、そのまま候補として渡せる。
+
+```ts
+import {
+  createCandidateTransformer,
+  initializeProjWasmRuntime,
+  listProjectedCrsFromProjWasm,
+} from '@c4h/atlas';
+import { estimateCrs } from '@c4h/teiresias';
+
+await initializeProjWasmRuntime(); // ブラウザでは { projWasmAssetBaseUrl } も渡す
+
+const rows = await listProjectedCrsFromProjWasm({
+  extent: { west: 135.6, south: 34.9, east: 135.9, north: 35.1 },
+  area: 'Japan',
+  onshoreOnly: true,
+});
+
+const result = await estimateCrs(gcps, rows, {
+  transformer: createCandidateTransformer(rows),
+});
+```
+
+transformer は、`geoBasis` が `{ kind: 'lonlat_deg', axisOrder: 'lon-lat' }` でないときと、行に無い id の
+ときに `null` を返す（契約 (7) の「業務的に変換不能」）。Atlas 側の失敗は `null` にならず throw される。
+Teiresias は throw／reject を候補ごとに受け止め、その候補を adapter bug として記録して `untransformableIds`
+に入れ、残りの候補の評価を続ける ∴ `estimateCrs` 自体は reject しない。usable な候補が 0 件で、こうした
+失敗が 1 件以上あれば status は `failed` になる（後述「status と診断」）。実 engine の E2E
+（`tests/estimate-crs.real-engine.e2e.test.ts`）とデモ（`demo/atlas-engine.js`）はこの形で配線している。
+
 ## ranking と score
 
 - 順位は **shear 前の basic（similarity）RMS** で決める。Daedalus が最終的に affine を採用し得るため、
