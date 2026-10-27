@@ -96,8 +96,11 @@ const result = await estimateCrs(gcps, rows, {
 
 The transformer gives `null` for a `geoBasis` other than `{ kind: 'lonlat_deg', axisOrder: 'lon-lat' }`
 and for an id that is not among the rows, which is contract (7) "untransformable in the domain sense".
-A failure on the Atlas side is thrown, not turned into `null`, and Teiresias does not catch it: the
-`estimateCrs` call rejects with it. The real-engine E2E (`tests/estimate-crs.real-engine.e2e.test.ts`)
+A failure on the Atlas side is thrown, not turned into `null`. Teiresias catches a throw or a reject
+per candidate: it records that candidate as an adapter bug, puts its id in `untransformableIds` and
+goes on with the remaining candidates, so `estimateCrs` itself does not reject. When no candidate is
+usable and at least one of them failed this way, the status is `failed` (see "Status and
+diagnostics" below). The real-engine E2E (`tests/estimate-crs.real-engine.e2e.test.ts`)
 and the demo (`demo/atlas-engine.js`) are wired this way.
 
 ## Ranking and score

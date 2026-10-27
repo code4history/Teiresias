@@ -91,8 +91,10 @@ const result = await estimateCrs(gcps, rows, {
 ```
 
 transformer は、`geoBasis` が `{ kind: 'lonlat_deg', axisOrder: 'lon-lat' }` でないときと、行に無い id の
-ときに `null` を返す（契約 (7) の「業務的に変換不能」）。Atlas 側の失敗は `null` にならず throw され、
-Teiresias はそれを捕まえない（`estimateCrs` の呼出しがその例外で reject する）。実 engine の E2E
+ときに `null` を返す（契約 (7) の「業務的に変換不能」）。Atlas 側の失敗は `null` にならず throw される。
+Teiresias は throw／reject を候補ごとに受け止め、その候補を adapter bug として記録して `untransformableIds`
+に入れ、残りの候補の評価を続ける ∴ `estimateCrs` 自体は reject しない。usable な候補が 0 件で、こうした
+失敗が 1 件以上あれば status は `failed` になる（後述「status と診断」）。実 engine の E2E
 （`tests/estimate-crs.real-engine.e2e.test.ts`）とデモ（`demo/atlas-engine.js`）はこの形で配線している。
 
 ## ranking と score
