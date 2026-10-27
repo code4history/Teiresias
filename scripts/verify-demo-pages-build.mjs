@@ -109,4 +109,38 @@ for (const { name, manifest } of versionManifests) {
   }
 }
 
+/**
+ * custom projection の定義（歴史グリッド）が成果物から取れること。
+ *
+ * `@c4h/atlas` の package build は同梱の定義ファイルを `data:application/json;base64,…` の
+ * 形で bundle に焼き込む。そのため `dist-demo` に別ファイルを複製せず、bundle に在る
+ * data URI を復号して、定義の中身（歴史グリッドの B 帯とその単位）まで確かめる。
+ * 定義が消えれば、この検査は赤になる。
+ */
+const customProjections = [];
+for (const match of scriptText.matchAll(/data:application\/json;base64,([A-Za-z0-9+/=]+)/g)) {
+  let parsed;
+  try {
+    parsed = JSON.parse(Buffer.from(match[1], "base64").toString("utf8"));
+  } catch {
+    continue;
+  }
+  const definitions = Array.isArray(parsed) ? parsed : parsed?.projections;
+  if (Array.isArray(definitions)) {
+    customProjections.push(...definitions);
+  }
+}
+
+const historicalZone = customProjections.find(
+  (definition) => definition?.authority === "UTJCP" && definition?.code === "ZONE-B",
+);
+if (historicalZone === undefined) {
+  throw new Error("built JS does not carry the custom projection definitions (UTJCP:ZONE-B)");
+}
+if (historicalZone.unit?.metresPerUnit !== 0.9143985307444408) {
+  throw new Error(
+    `custom projection UTJCP:ZONE-B does not carry the yard unit (${historicalZone.unit?.metresPerUnit})`,
+  );
+}
+
 console.log("dist-demo Pages artifact verified.");

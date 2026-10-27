@@ -263,6 +263,10 @@ final RMS を別名で公開する API は無い。
 - **未対応**: inverse 変換による geodesic RMS、アンチメリディアン、極域、epoch / grid provenance、
   robust / weight / LOO / bootstrap、進捗 callback、並列候補処理。
   [#5](https://github.com/code4history/Teiresias/issues/5) で扱う。
+- **単位だけが違う CRS は GCP の当てはめでは区別できない**: 同じ投影で線形単位だけが違う CRS
+  （metre と US survey foot など）は、相似変換の縮尺が単位の差を吸収するため、当てはめでは
+  区別できない。どちらが選ばれても world file の数値だけが違う。歴史グリッドと近くの現代の CRS の
+  差は、正確な GCP でも数 cm である（実際の地図では GCP の誤差の方が大きい）。
 - **CLI は無い**: Teiresias はライブラリだけを提供する。コマンドラインの道具は無い。
 - **配布**: 本 package はまだ npm に公開していない（`private: true`）。`@c4h/daedalus` は
   ローカル sibling の `link:../Daedalus` で解決している。
@@ -323,11 +327,14 @@ pnpm run preview
 | `place` | 京都の GCP | 東京の GCP |
 | `y-direction` | y 上向き | y 下向き（走査した地図） |
 | `normalization` | 正規化あり | 正規化なし |
+| `historical-grid` | 現代の地図（VI 系で描いた） | 戦前の市街図（歴史グリッド B 帯で描いた） |
 
 順位の表の上には流れの 1 行（`Atlas` → `Daedalus` → `Teiresias`。候補・変換できた件数・当てはめた
 件数・1 位の CRS を実行時の値で出す）、識別力の札の横には「比べた相手」、選択結果には world file の
-6 値と `yScale` の符号を言葉にした「y 上向き／y 下向き」を出す。world file の当てはめのパネルは
-Daedalus のデモにあるので、選択結果からそこへリンクする。
+6 値と `yScale` の符号を言葉にした「y 上向き／y 下向き」を出す。順位の表には候補ごとの単位の
+列があり、選択結果では world file の 6 値の隣にその単位の名前を出す（歴史グリッドなら yard）。
+1 位と 2 位の `rmsMeters` も並べて出す。world file の当てはめのパネルは Daedalus のデモにあるので、
+選択結果からそこへリンクする。
 
 proj-wasm は Worker と WASM を読むため、**`file://` では動かない**（HTTP で配信すること）。
 

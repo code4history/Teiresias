@@ -47,7 +47,7 @@ describe('publish and demo packaging', () => {
     expect(engineJs).toContain('import(\'@c4h/atlas\')');
     expect(engineJs).toContain('initializeProjWasmRuntime');
     expect(engineJs).toContain('listProjectedCrsFromProjWasm');
-    expect(engineJs).toContain('transformLonLatArrayToProjected');
+    expect(engineJs).toContain('transformLonLatToCandidate');
     // transformer はローカルに組まず、Atlas の公開 adapter で作る
     expect(engineJs).toContain('createCandidateTransformer');
     expect(engineJs).toContain('projWasmAssetBaseUrl');

@@ -191,6 +191,8 @@ export async function runScene({
       code: entry.code,
       score: entry.score,
       rmsMeters: entry.rmsMeters,
+      // その候補の座標の単位（world file もこの単位）。metre でない候補を画面に出すために要る。
+      unit: entry.unit,
       isTruth: id === scene.truthId,
       // 「同値」= 真値と定義（`proj4`）が同じ候補。両方の `proj4` が分かるときだけ印を付ける。
       isSameDefinition:
