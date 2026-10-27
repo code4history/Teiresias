@@ -33,9 +33,11 @@ import type {
   CandidateCrs,
   CandidateFailure,
   CandidateFailureKind,
+  CandidatePoints,
   EstimateOptions,
   EstimationFailure,
   EstimationResult,
+  LinearUnit,
 } from '@c4h/teiresias';
 
 const result: EstimationResult = await estimateCrs(gcps, candidates, {
@@ -87,7 +89,7 @@ const result: EstimationResult = await estimateCrs(gcps, candidates, {
 |---|---|
 | (1) | id は `` `${authority}:${code}` `` |
 | (2) | 入力は `geoBasis` が示す順序の geo 点列（同順） |
-| (3) | 出力は同順同数の projected `[easting, northing]` 点列 |
+| (3) | 出力は同順同数の projected `[easting, northing]` 点列、または `{ points, unit }`（下の「単位」を参照） |
 | (4) | 空入力は `null`（`[]` を返さない） |
 | (5) | 一点でも非有限 / 変換不能なら全体 `null`（部分成功を返さない） |
 | (6) | 入出力の長さ不一致は adapter contract failure |
@@ -97,9 +99,31 @@ const result: EstimationResult = await estimateCrs(gcps, candidates, {
 同期返却と `Promise` 返却の双方が適合する。Teiresias は候補を**入力順に逐次**処理し、
 返却を `await` で正規化する（failure / warning の順序と adapter 呼出し順を決定的にするため）。
 
-transformer の成功出力を **metre の projected `[E, N]`** と解釈する。Teiresias は
-Daedalus へ常に `{ kind: 'planar_xy', axisOrder: 'xy', unit: 'm' }` を渡し、入力側 `geoBasis` を
-そのまま横流ししない。native 単位が metre でない候補の扱いは現在の API に存在しない。
+### 単位
+
+候補 CRS の座標の単位は metre とは限らない（歴史的な格子の yard・US survey foot など）。
+transformer はそのような候補を 2 つの形で返せる。
+
+| 形 | 意味 |
+|---|---|
+| `Array<[number, number]>` | projected `[E, N]` を **metre** で（従来の形） |
+| `CandidatePoints` = `{ points, unit }` | projected `[E, N]` を **`unit` の単位**で（`points` は同順同数） |
+
+`LinearUnit` は `{ name, metresPerUnit }` で、単位の名前と 1 単位が何 metre かを持つ
+（`metresPerUnit` は正の有限値・`name` は空でない文字列）。metre は
+`{ name: 'metre', metresPerUnit: 1 }` であり、plain な点列はこの単位の `CandidatePoints` と同じである。
+
+Teiresias は返った点列を `metresPerUnit` 倍して metre で当てはめる。holdout の点も同じ倍率で換算し、
+Daedalus へ渡す `[E, N]` は常に metre である。∴
+
+- `ranked` と `selected` の `rmsMeters` は metre のまま（同じ呼び出しの全候補を同じ尺度で比べられる）。
+- `selected.unit` と `ranked[].unit` はその候補の座標の単位を持つ。plain な点列を返す transformer では
+  `{ name: 'metre', metresPerUnit: 1 }` になる。
+- `selected.worldFile` は pixel → **その単位**の写像である。6 値とも `metresPerUnit` で割る
+  （写像は線形なので 6 値は同じ倍率）。metre の候補では従来と同じ値になる。
+
+不正な unit（空の `name`、正の有限値でない `metresPerUnit`）は adapter contract failure である。
+他の契約違反と同じくその候補を記録し、推定は `failed` になる（下の「status と診断」を参照）。
 
 ### Atlas と組み合わせる
 
@@ -128,6 +152,11 @@ const result = await estimateCrs(gcps, rows, {
   transformer: createCandidateTransformer(rows),
 });
 ```
+
+座標が metre でない行（歴史的な格子の yard など）では、`createCandidateTransformer` は plain な点列では
+なく `{ points, unit }` を返す。Teiresias は上の「単位」のとおり換算する。行を自分で変換するときは、
+`transformLonLatToCandidate` が点列とその行の単位を返す。`transformLonLatArrayToProjected` は従来の形を
+保ち、metre でない行には `null` を返す。
 
 transformer は、`geoBasis` が `{ kind: 'lonlat_deg', axisOrder: 'lon-lat' }` でないときと、行に無い id の
 ときに `null` を返す（契約 (7) の「業務的に変換不能」）。Atlas 側の失敗は `null` にならず throw される。
@@ -166,8 +195,9 @@ transformer の呼び出しは候補ごとに 1 回のまま変わらない。�
 
 | 値 | 意味 |
 |---|---|
-| `ranked[].rmsMeters` / `selected.rmsMeters` | **ranking に用いた shear 前 basic RMS** |
+| `ranked[].rmsMeters` / `selected.rmsMeters` | **ranking に用いた shear 前 basic RMS**（metre） |
 | `selected.worldFile` / `selected.qualityGate` | **同じ候補に対する Daedalus の最終返却**（affine 採用を含み得る） |
+| `selected.unit` / `ranked[].unit` | **その候補の座標の単位**。`selected.worldFile` はこの単位で、`rmsMeters` はそうではない |
 
 ∴ `selected.worldFile` が affine のとき、`selected.rmsMeters` はその worldFile の残差ではない。
 final RMS を別名で公開する API は無い。
@@ -226,7 +256,6 @@ final RMS を別名で公開する API は無い。
 - **`timeoutMs` が効くのは非同期の待ちだけ**: JavaScript のスレッドを同期で握り続ける transformer は、
   タイマーが動けないので打ち切れない。Atlas の transformer（`createCandidateTransformer`）は Promise を
   返すので、エンジンの初期化などの非同期の待ちには上限が効くが、その中の同期の変換処理には効かない。
-- **単位**: 成功候補の transformer 出力は metre 固定。foot / native unit の扱いは未対応である。
 - **同値な候補**: カタログには、識別子は違うが投影の定義（PROJ 文字列）が同じ CRS が含まれうる
   （例: `EPSG:2448`・`EPSG:6674`・`ESRI:112206`）。これらは推定でまったく同じ値になるため、`ranked` の
   中の並びは identity の順で決まる。同値な候補の群を返す API は無い。候補の `proj4` を比べれば

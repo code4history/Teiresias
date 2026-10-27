@@ -16,6 +16,7 @@ import type {
   CandidateCrs,
   CandidateFailure,
   CandidateFailureKind,
+  CandidatePoints,
   CandidateTransformer,
   EstimateOptions,
   EstimationFailure,
@@ -24,6 +25,7 @@ import type {
   FitWarning,
   GcpPair,
   GeoBasis,
+  LinearUnit,
   MaybePromise,
   QualityGate,
   WorldFile,
@@ -33,18 +35,29 @@ import type {
 const candidate: CandidateCrs = { authority: 'MOCK', code: 'PLANE-A', datumFamily: 'MOCKDATUM' };
 const candidateWithoutDatumFamily: CandidateCrs = { authority: 'MOCK', code: 'PLANE-B' };
 
-// --- CandidateTransformer: 引数 3 個・戻り値 MaybePromise<Array|null> ---------
+// --- LinearUnit / CandidatePoints: 単位の型を値で束縛する ---------------------
+const yard: LinearUnit = { name: 'yard', metresPerUnit: 0.9143985307444408 };
+const metre: LinearUnit = { name: 'metre', metresPerUnit: 1 };
+const candidatePoints: CandidatePoints = { points: [[0, 0], [10, 10]], unit: yard };
+
+// --- CandidateTransformer: 引数 3 個・戻り値 MaybePromise<Array | CandidatePoints | null>
 const syncTransformer: CandidateTransformer = (
   id: string,
   points: ReadonlyArray<readonly [number, number]>,
   geoBasis: GeoBasis,
-): MaybePromise<Array<[number, number]> | null> => {
+): MaybePromise<Array<[number, number]> | CandidatePoints | null> => {
   if (points.length === 0 || id === '' || geoBasis.kind !== 'lonlat_deg') return null;
   return points.map(([lon, lat]): [number, number] => [lon, lat]);
 };
 
 const asyncTransformer: CandidateTransformer = async (_id, points) =>
   points.map(([lon, lat]): [number, number] => [lon, lat]);
+
+/** 単位つきの点列を返す transformer も同じ型に適合する。 */
+const unitTransformer: CandidateTransformer = (_id, points) => ({
+  points: points.map(([easting, northing]): [number, number] => [easting / yard.metresPerUnit, northing / yard.metresPerUnit]),
+  unit: yard,
+});
 
 // --- EstimateOptions: 全フィールドの型を束縛する -------------------------------
 const fullOptions: EstimateOptions = {
@@ -126,11 +139,14 @@ const selectedResult: EstimationResult = {
   selected: {
     identity: { authority: candidate.authority, code: candidate.code },
     worldFile,
+    unit: metre,
     score: 0.5,
     rmsMeters: 12.5,
     qualityGate: gate,
   },
-  ranked: [{ authority: candidate.authority, code: candidate.code, score: 0.5, rmsMeters: 12.5 }],
+  ranked: [
+    { authority: candidate.authority, code: candidate.code, score: 0.5, rmsMeters: 12.5, unit: metre },
+  ],
   warnings: [],
   untransformableIds: ['MOCK:PLANE-B'],
   failure: null,
@@ -183,10 +199,12 @@ describe('api smoke（公開型と estimateCrs signature の compile-time 束縛
     if (selected !== null) {
       const selectedGate: Exclude<QualityGate, 'unusable'> = selected.qualityGate;
       const selectedWorldFile: WorldFile = selected.worldFile;
+      const selectedUnit: LinearUnit = selected.unit;
       const selectedScore: number | null = selected.score;
       const selectedRms: number = selected.rmsMeters;
       expect(typeof selectedGate).toBe('string');
       expect(Object.keys(selectedWorldFile)).toHaveLength(6);
+      expect(typeof selectedUnit.name).toBe('string');
       expect(selectedScore === null || Number.isFinite(selectedScore)).toBe(true);
       expect(Number.isFinite(selectedRms)).toBe(true);
     }
@@ -224,13 +242,31 @@ describe('api smoke（公開型と estimateCrs signature の compile-time 束縛
     ]);
   });
 
+  it('単位つきの点列を返す transformer も CandidateTransformer に適合する', async () => {
+    const lonlat: GeoBasis = { kind: 'lonlat_deg', axisOrder: 'lon-lat' };
+    const returned = unitTransformer('MOCK:PLANE-A', [[yard.metresPerUnit, 0]], lonlat);
+    const converted = await returned;
+    expect(converted).not.toBeNull();
+    const candidatePointsResult = converted as CandidatePoints;
+    expect(candidatePointsResult.unit).toEqual(yard);
+    expect(candidatePointsResult.points).toEqual([[1, 0]]);
+  });
+
   it('EstimationResult の 2 形（selected あり / なし）が型に適合する', () => {
     expect(emptyResult.selected).toBeNull();
     expect(selectedResult.selected?.identity.code).toBe('PLANE-A');
+    expect(selectedResult.selected?.unit).toEqual(metre);
     expect(selectedResult.ranked[0]?.rmsMeters).toBe(12.5);
+    expect(selectedResult.ranked[0]?.unit).toEqual(metre);
     expect(selectedResult.untransformableIds).toEqual(['MOCK:PLANE-B']);
     expect(selectedResult.failure).toBeNull();
     expect(failedResult.failure?.candidates[0]?.kind).toBe('adapter-bug');
+  });
+
+  it('LinearUnit / CandidatePoints の型束縛に使った定数が実体を持つ', () => {
+    expect(candidatePoints.unit.metresPerUnit).toBe(0.9143985307444408);
+    expect(candidatePoints.points).toHaveLength(2);
+    expect(yard.metresPerUnit).toBeGreaterThan(0);
   });
 
   it('失敗の型と新しい option が実体を持つ', () => {

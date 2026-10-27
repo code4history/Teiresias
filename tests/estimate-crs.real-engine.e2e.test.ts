@@ -23,6 +23,7 @@ import {
   createCandidateTransformer,
   listProjectedCrsFromProjWasm,
   transformLonLatArrayToProjected,
+  transformLonLatToCandidate,
   type ProjectedCrsInfo,
 } from '@c4h/atlas';
 
@@ -781,5 +782,107 @@ describe('chirality 正規化（既定）: 実 engine・既定カタログ', () 
       const a = rmsOf(reflected.result, id);
       expect(Math.abs(a - entry.rmsMeters)).toBeLessThanOrEqual(1e-9 * Math.max(1, entry.rmsMeters));
     }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 格子の単位が metre でない候補: その単位で作った pixel から推定する
+// ---------------------------------------------------------------------------
+
+const UTJCP_ID = 'UTJCP:ZONE-B';
+/** 都市計画図の格子の yard（1 yard = 0.9143985307444408 m）。 */
+const YARD_METRES = 0.9143985307444408;
+/** 1 pixel = 10 yard（格子の単位で 10）。 */
+const GRID_UNITS_PER_PIXEL = 10;
+
+let customCatalogPromise: Promise<ProjectedCrsInfo[]> | undefined;
+
+/**
+ * 京都の範囲・`area: 'Japan'`・custom の行を含み、沖合の行も残したカタログ。
+ * 歴史的な格子（`UTJCP`）の行は `includeCustomProjections: true` のときだけ入る。
+ */
+function customCatalog(): Promise<ProjectedCrsInfo[]> {
+  if (!customCatalogPromise) {
+    customCatalogPromise = listProjectedCrsFromProjWasm({
+      extent: KYOTO_EXTENT,
+      area: 'Japan',
+      onshoreOnly: false,
+      includeCustomProjections: true,
+    });
+  }
+  return customCatalogPromise;
+}
+
+/**
+ * 真値の CRS の単位で GCP の pixel を作る（1 pixel = `GRID_UNITS_PER_PIXEL` 単位・反射なし）。
+ * 単位が metre でない候補でも `transformLonLatToCandidate` がその単位の点列を返す。
+ */
+async function gcpsInGridUnits(
+  row: ProjectedCrsInfo,
+): Promise<Array<{ pixel: [number, number]; geo: [number, number] }>> {
+  const converted = await transformLonLatToCandidate(row, GCP_LONLAT);
+  if (converted === null) throw new Error(`${row.id} cannot project the points`);
+  const [e0, n0] = converted.points[0];
+  return GCP_LONLAT.map((geo, index) => ({
+    pixel: [
+      (converted.points[index][0] - e0) / GRID_UNITS_PER_PIXEL,
+      (converted.points[index][1] - n0) / GRID_UNITS_PER_PIXEL,
+    ],
+    geo: [geo[0], geo[1]],
+  }));
+}
+
+describe('格子の単位が metre でない候補（実 engine）', () => {
+  it('カタログは京都に UTJCP:ZONE-B を格子の単位（yard）つきで返し、EPSG:6674 も含む', async () => {
+    const rows = await customCatalog();
+    const ids = rows.map((row) => row.id);
+    expect(ids).toContain(UTJCP_ID);
+    expect(ids).toContain(TRUE_ID);
+    expect(ids.filter((id) => id.startsWith('UTJCP:'))).toEqual([UTJCP_ID]);
+
+    const truth = rows.find((row) => row.id === UTJCP_ID) as ProjectedCrsInfo;
+    expect(truth.unit).toEqual({ name: 'yard (Japan City Plans)', metresPerUnit: YARD_METRES });
+  });
+
+  it('UTJCP:ZONE-B の格子座標から作った pixel で ranked[0] が UTJCP:ZONE-B になる', async () => {
+    const candidates = await customCatalog();
+    const grid = await gcpsInGridUnits(candidates.find((row) => row.id === UTJCP_ID) as ProjectedCrsInfo);
+
+    const result = await estimateCrs(grid, candidates, {
+      transformer: createCandidateTransformer(candidates),
+    });
+
+    expect(result.failure).toBeNull();
+    expect(result.status).not.toBe('failed');
+    expect(result.untransformableIds).toEqual([]);
+    expect(rankedIds(result)[0]).toBe(UTJCP_ID);
+    expect(rankedIds(result).length).toBeGreaterThan(1);
+    expect(result.selected?.unit).toEqual({ name: 'yard (Japan City Plans)', metresPerUnit: YARD_METRES });
+    // rmsMeters は全候補で比べられるよう metre のまま（worldFile だけが格子の単位）
+    expect(Number.isFinite(result.selected?.rmsMeters as number)).toBe(true);
+    expect(result.ranked.every((entry) => entry.unit.metresPerUnit > 0)).toBe(true);
+    // pixel は 1 つ 10 yard で作ったので、格子の単位の worldFile の倍率は 10（metre なら約 10.94）
+    const worldFile = result.selected?.worldFile as NonNullable<EstimationResult['selected']>['worldFile'];
+    expect(Math.hypot(worldFile.xScale, worldFile.xSkew)).toBeCloseTo(GRID_UNITS_PER_PIXEL, 6);
+  });
+
+  it('同じ候補に EPSG:6674 から作った pixel を渡すと ranked[0..k-1] が EPSG:6674 の縮退クラスになる', async () => {
+    const candidates = await customCatalog();
+    const truth = candidates.find((row) => row.id === TRUE_ID) as ProjectedCrsInfo;
+    const klass = candidates
+      .filter((row) => row.proj4 === truth.proj4)
+      .map((row) => row.id)
+      .sort();
+    expect(klass).toContain(TRUE_ID);
+
+    const metres = await gcpsInGridUnits(truth);
+    const result = await estimateCrs(metres, candidates, {
+      transformer: createCandidateTransformer(candidates),
+    });
+
+    expect(result.failure).toBeNull();
+    expect(result.status).not.toBe('failed');
+    expect(rankedIds(result).slice(0, klass.length).sort()).toEqual(klass);
+    expect(result.selected?.unit).toEqual({ name: 'metre', metresPerUnit: 1 });
   });
 });

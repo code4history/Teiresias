@@ -57,6 +57,8 @@ import type {
   FitWarning,
   GcpPair,
   GeoBasis,
+  LinearUnit,
+  WorldFile,
 } from '../src/index.js';
 
 const lonlat: GeoBasis = geoBasisLonLat;
@@ -1295,5 +1297,283 @@ describe('holdout', () => {
       kind: 'adapter-contract-failure',
       message: 'expected 7 points, got 6',
     });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 単位つきの候補: `{ points, unit }` は metre へ換算してから当てはめ、結果に単位を添える
+// ---------------------------------------------------------------------------
+
+/** 1 yard = 0.9143985307444408 m（都市計画図の格子の単位と同じ換算）。 */
+const METRES_PER_YARD = 0.9143985307444408;
+const yardUnit: LinearUnit = { name: 'yard', metresPerUnit: METRES_PER_YARD };
+const metreUnit: LinearUnit = { name: 'metre', metresPerUnit: 1 };
+
+/**
+ * 同じ地面の座標を metre の配列で返す候補（unit なし = 従来の形）。
+ * `teiresiasE2eGcps` に対しては PLANE-A が真値になる。
+ */
+const metreCandidate = (
+  id: string,
+  points: ReadonlyArray<readonly [number, number]>,
+  geoBasis: GeoBasis,
+): Array<[number, number]> | null => mockTransformer(id, points, geoBasis);
+
+/** 同じ地面の座標を yard で返す候補（metre の値を換算係数で割った点列 + unit）。 */
+const yardCandidate: CandidateTransformer = (id, points, geoBasis) => {
+  const metres = mockTransformer(id, points, geoBasis);
+  if (metres === null) return null;
+  return {
+    points: metres.map(([easting, northing]): [number, number] => [
+      easting / METRES_PER_YARD,
+      northing / METRES_PER_YARD,
+    ]),
+    unit: yardUnit,
+  };
+};
+
+/** 返却を `{ points, unit }` に包み、unit だけを差し替える候補（不正な unit の注入用）。 */
+const candidateWithUnit = (unit: unknown): CandidateTransformer =>
+  ((id, points, geoBasis) => {
+    const metres = mockTransformer(id, points, geoBasis);
+    if (metres === null) return null;
+    return { points: metres, unit } as never;
+  }) as CandidateTransformer;
+
+/** 相対 1e-9 以内か（0 と 0 は一致とみなす）。 */
+function expectRelativelyClose(actual: number, expected: number): void {
+  expect(Math.abs(actual - expected)).toBeLessThanOrEqual(1e-9 * Math.max(1, Math.abs(expected)));
+}
+
+/** worldFile の 6 値を定義順に並べる。 */
+function worldFileValues(worldFile: WorldFile): number[] {
+  return [
+    worldFile.xScale,
+    worldFile.xSkew,
+    worldFile.xOrigin,
+    worldFile.ySkew,
+    worldFile.yScale,
+    worldFile.yOrigin,
+  ];
+}
+
+// ---------------------------------------------------------------------------
+// 原点が 0 でなく、回転と固定の雑音を含む GCP 用の候補
+// ---------------------------------------------------------------------------
+
+/**
+ * 真の写像 `E = a*u + b*v + E0`、`N = c*u + d*v + N0`。
+ *
+ * 原点は数十万 m（どこかの平面直角座標系のような絶対値）、`b` と `c` は 0 でない
+ * （回転がある）ようにしてある。写像は相似変換（回転 + 等方スケール）なので
+ * 反射を含まず、Daedalus の basic 当てはめで厳密に表現できる。
+ */
+const ROTATED_TRUTH = {
+  a: 0.25 * Math.cos((8 * Math.PI) / 180),
+  b: -0.25 * Math.sin((8 * Math.PI) / 180),
+  c: 0.25 * Math.sin((8 * Math.PI) / 180),
+  d: 0.25 * Math.cos((8 * Math.PI) / 180),
+  e0: 250000,
+  n0: 87500,
+} as const;
+
+/** GCP の pixel 座標（同一直線上にない 6 点）。geo にも同じ数値を置く。 */
+const ROTATED_PIXELS: ReadonlyArray<readonly [number, number]> = [
+  [0, 0],
+  [1200, 0],
+  [0, 900],
+  [1200, 900],
+  [500, 600],
+  [900, 300],
+];
+
+/** 各点に足す固定の雑音（m、±0.05 程度）。乱数は使わない。 */
+const ROTATED_NOISE: ReadonlyArray<readonly [number, number]> = [
+  [0.03, -0.02],
+  [-0.04, 0.05],
+  [0.02, 0.04],
+  [-0.03, -0.05],
+  [0.05, 0.01],
+  [-0.01, -0.03],
+];
+
+/** pixel 座標から、その点に足す雑音を引く。 */
+const rotatedNoiseByPixel = new Map<string, readonly [number, number]>(
+  ROTATED_PIXELS.map(([u, v], index) => [`${u},${v}`, ROTATED_NOISE[index]] as const),
+);
+
+/** 原点・回転・雑音のある GCP（pixel と平面座標に同じ数値を置く）。 */
+const rotatedGcps: ReadonlyArray<GcpPair> = ROTATED_PIXELS.map(([u, v]) => ({
+  pixel: [u, v] as [number, number],
+  geo: [u, v] as [number, number],
+}));
+
+const rotatedMetreId: CandidateCrs = { authority: 'MOCK', code: 'ROTATED-METRE' };
+const rotatedYardId: CandidateCrs = { authority: 'MOCK', code: 'ROTATED-YARD' };
+
+/** 都市計画図の格子の単位（1 yard = 0.9143985307444408 m）。 */
+const japanCityPlansYard: LinearUnit = {
+  name: 'yard (Japan City Plans)',
+  metresPerUnit: METRES_PER_YARD,
+};
+
+/**
+ * 同じ地面座標を、id に応じて metre の配列（`ROTATED-METRE`）または yard の
+ * `{ points, unit }`（`ROTATED-YARD`）で返す候補。
+ */
+const rotatedCandidate: CandidateTransformer = (id, points) => {
+  if (id !== 'MOCK:ROTATED-METRE' && id !== 'MOCK:ROTATED-YARD') {
+    return null;
+  }
+
+  const metres: Array<[number, number]> = [];
+  for (const [u, v] of points) {
+    const noise = rotatedNoiseByPixel.get(`${u},${v}`);
+    if (noise === undefined) {
+      return null;
+    }
+    metres.push([
+      ROTATED_TRUTH.a * u + ROTATED_TRUTH.b * v + ROTATED_TRUTH.e0 + noise[0],
+      ROTATED_TRUTH.c * u + ROTATED_TRUTH.d * v + ROTATED_TRUTH.n0 + noise[1],
+    ]);
+  }
+
+  if (id === 'MOCK:ROTATED-METRE') {
+    return metres;
+  }
+  return {
+    points: metres.map(([easting, northing]): [number, number] => [
+      easting / METRES_PER_YARD,
+      northing / METRES_PER_YARD,
+    ]),
+    unit: japanCityPlansYard,
+  };
+};
+
+describe('単位つきの候補（{ points, unit }）', () => {
+  it('同じ地面座標を metre で返す候補と yard で返す候補は rmsMeters が相対 1e-9 以内で一致する', async () => {
+    const x = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: metreCandidate });
+    const y = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: yardCandidate });
+
+    expect(x.status).toBe('ok_with_warnings');
+    expect(y.status).toBe('ok_with_warnings');
+    expect(x.failure).toBeNull();
+    expect(y.failure).toBeNull();
+    expect(y.untransformableIds).toEqual([]);
+    expect(x.selected?.identity).toEqual(y.selected?.identity);
+    expect(x.selected?.qualityGate).toBe(y.selected?.qualityGate);
+    expectRelativelyClose(y.selected?.rmsMeters as number, x.selected?.rmsMeters as number);
+    expectRelativelyClose(y.ranked[0].rmsMeters, x.ranked[0].rmsMeters);
+  });
+
+  it('selected.unit と ranked[].unit は候補が返した単位で、配列を返す候補は metre である', async () => {
+    const metreResult = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: metreCandidate });
+    expect(metreResult.selected?.unit).toEqual(metreUnit);
+    expect(metreResult.ranked[0].unit).toEqual(metreUnit);
+
+    const yardResult = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: yardCandidate });
+    expect(yardResult.selected?.unit).toEqual(yardUnit);
+    expect(yardResult.ranked[0].unit).toEqual(yardUnit);
+  });
+
+  it('yard の候補の selected.worldFile は 6 値とも metre の値 ÷ 換算係数である', async () => {
+    const metreResult = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: metreCandidate });
+    const yardResult = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: yardCandidate });
+
+    const metres = worldFileValues(metreResult.selected?.worldFile as WorldFile);
+    const yards = worldFileValues(yardResult.selected?.worldFile as WorldFile);
+    expect(yards).toHaveLength(metres.length);
+    for (let index = 0; index < metres.length; index++) {
+      expectRelativelyClose(yards[index], metres[index] / METRES_PER_YARD);
+    }
+  });
+
+  it('holdout も同じ倍率で換算され、metre の候補と同じ identity・RMS になる', async () => {
+    const holdout: readonly GcpPair[] = [{ pixel: [2, 7], geo: [135.015625, 35.0546875] }];
+    const x = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: metreCandidate, holdout });
+    const y = await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: yardCandidate, holdout });
+
+    expect(y.status).toBe(x.status);
+    expect(y.selected?.identity).toEqual(x.selected?.identity);
+    expectRelativelyClose(y.selected?.rmsMeters as number, x.selected?.rmsMeters as number);
+    expect(y.untransformableIds).toEqual([]);
+  });
+
+  it('不正な unit（0・負・NaN・空の name）は adapter-contract-failure で failed になる', async () => {
+    const invalidUnits: unknown[] = [
+      { name: 'yard', metresPerUnit: 0 },
+      { name: 'yard', metresPerUnit: -1 },
+      { name: 'yard', metresPerUnit: Number.NaN },
+      { name: '', metresPerUnit: 1 },
+    ];
+
+    for (const unit of invalidUnits) {
+      const result = await estimateCrs(teiresiasE2eGcps, [planeA], {
+        transformer: candidateWithUnit(unit),
+      });
+      expect(result.status).toBe('failed');
+      expect(result.selected).toBeNull();
+      expect(result.untransformableIds).toEqual(['MOCK:PLANE-A']);
+      expect(result.failure).toEqual({
+        reason: 'implementation-failure',
+        candidates: [{ id: 'MOCK:PLANE-A', kind: 'adapter-contract-failure', message: 'invalid unit' }],
+      });
+    }
+  });
+
+  it('正の有限の metresPerUnit と空でない name を持つ unit は受理される', async () => {
+    const result = await estimateCrs(teiresiasE2eGcps, [planeA], {
+      transformer: candidateWithUnit({ name: 'US survey foot', metresPerUnit: 1200 / 3937 }),
+    });
+    expect(result.status).toBe('ok_with_warnings');
+    expect(result.untransformableIds).toEqual([]);
+    expect(result.selected?.unit).toEqual({ name: 'US survey foot', metresPerUnit: 1200 / 3937 });
+  });
+
+  it('原点・回転・雑音のある GCP でも、yard の候補の rmsMeters は metre の候補と相対 1e-9 以内で一致し 0 でない', async () => {
+    const x = await estimateCrs(rotatedGcps, [rotatedMetreId], {
+      transformer: rotatedCandidate,
+      geoBasis: planar,
+    });
+    const y = await estimateCrs(rotatedGcps, [rotatedYardId], {
+      transformer: rotatedCandidate,
+      geoBasis: planar,
+    });
+
+    expect(x.selected).not.toBeNull();
+    expect(y.selected).not.toBeNull();
+    expect(x.failure).toBeNull();
+    expect(y.failure).toBeNull();
+
+    const xRms = x.selected?.rmsMeters as number;
+    expect(xRms).toBeGreaterThan(0);
+    expectRelativelyClose(y.selected?.rmsMeters as number, xRms);
+    expectRelativelyClose(y.ranked[0].rmsMeters, x.ranked[0].rmsMeters);
+    expect(y.selected?.unit).toEqual(japanCityPlansYard);
+    expect(y.ranked[0].unit).toEqual(japanCityPlansYard);
+  });
+
+  it('原点・回転・雑音のある GCP では worldFile の 6 値がどれも 0 でなく、yard の値は metre の値 ÷ 換算係数', async () => {
+    const x = await estimateCrs(rotatedGcps, [rotatedMetreId], {
+      transformer: rotatedCandidate,
+      geoBasis: planar,
+    });
+    const y = await estimateCrs(rotatedGcps, [rotatedYardId], {
+      transformer: rotatedCandidate,
+      geoBasis: planar,
+    });
+
+    const metres = worldFileValues(x.selected?.worldFile as WorldFile);
+    const yards = worldFileValues(y.selected?.worldFile as WorldFile);
+    expect(metres).toHaveLength(6);
+    expect(yards).toHaveLength(6);
+
+    // 6 値すべてが 0 でないことを確かめてから換算を比べる（0 は割っても割らなくても一致するため）。
+    for (const value of metres) {
+      expect(value).not.toBe(0);
+    }
+    for (let index = 0; index < metres.length; index++) {
+      expectRelativelyClose(yards[index], metres[index] / METRES_PER_YARD);
+    }
   });
 });

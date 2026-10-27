@@ -33,9 +33,11 @@ import type {
   CandidateCrs,
   CandidateFailure,
   CandidateFailureKind,
+  CandidatePoints,
   EstimateOptions,
   EstimationFailure,
   EstimationResult,
+  LinearUnit,
 } from '@c4h/teiresias';
 
 const result: EstimationResult = await estimateCrs(gcps, candidates, {
@@ -92,7 +94,7 @@ The transformer injected by the caller must satisfy the following contract.
 |---|---|
 | (1) | the id is `` `${authority}:${code}` `` |
 | (2) | the input is a sequence of geo points in the order indicated by `geoBasis` (same order) |
-| (3) | the output is a sequence of projected `[easting, northing]` points of the same order and the same length |
+| (3) | the output is a sequence of projected `[easting, northing]` points of the same order and the same length, or `{ points, unit }` (see "Units") |
 | (4) | an empty input gives `null` (it does not return `[]`) |
 | (5) | if even one point is non-finite / untransformable, the whole result is `null` (no partial success is returned) |
 | (6) | a length mismatch between input and output is an adapter contract failure |
@@ -103,10 +105,35 @@ Both synchronous returns and `Promise` returns conform. Teiresias processes the 
 **sequentially in input order** and normalizes the returns with `await` (so that the order of
 failures / warnings and the order of adapter calls are deterministic).
 
-A successful transformer output is interpreted as projected `[E, N]` **in metres**.
-Teiresias always passes `{ kind: 'planar_xy', axisOrder: 'xy', unit: 'm' }` to Daedalus and does not
-forward the input-side `geoBasis` as-is. Handling of candidates whose native unit is not the metre does
-not exist in the current API.
+### Units
+
+A candidate CRS may count its coordinates in something other than the metre (the yard of a historical
+grid, the US survey foot, and so on). A transformer can return such a candidate in two shapes:
+
+| shape | meaning |
+|---|---|
+| `Array<[number, number]>` | projected `[E, N]` **in metres** (the plain shape) |
+| `CandidatePoints` = `{ points, unit }` | projected `[E, N]` **in `unit`** (`points` in the same order and the same length) |
+
+`LinearUnit` is `{ name, metresPerUnit }`: the name of the unit and how many metres one unit is
+(`metresPerUnit` must be a positive finite number, `name` a non-empty string). The metre is
+`{ name: 'metre', metresPerUnit: 1 }`, so a plain point list is the same as a `CandidatePoints` with
+that unit.
+
+Teiresias multiplies the returned points by `metresPerUnit` and fits in metres: the holdout points are
+converted with the same factor, and the `[E, N]` handed to Daedalus is always metric. Therefore:
+
+- `rmsMeters` (on `ranked` and on `selected`) stays in metres, so every candidate of one call is
+  comparable on the same scale.
+- `selected.unit` and `ranked[].unit` carry the unit of that candidate's coordinates. They are
+  `{ name: 'metre', metresPerUnit: 1 }` for a transformer that returns a plain point list.
+- `selected.worldFile` is the pixel → **that unit** mapping: all six values are divided by
+  `metresPerUnit` (the mapping is linear, so the six values share one factor). For a metre candidate
+  the values are the same as before.
+
+An invalid unit (an empty `name`, or a `metresPerUnit` that is not a positive finite number) is an
+adapter contract failure: the candidate is recorded like any other contract violation and the estimate
+turns `failed` (see "Status and diagnostics").
 
 ### Using with Atlas
 
@@ -136,6 +163,12 @@ const result = await estimateCrs(gcps, rows, {
   transformer: createCandidateTransformer(rows),
 });
 ```
+
+A row whose coordinates are not in metres (for example the yard of a historical grid) makes
+`createCandidateTransformer` return `{ points, unit }` instead of a plain point list; Teiresias converts
+it as described in "Units". To convert a single row yourself, `transformLonLatToCandidate` returns the
+points together with the unit of that row, while `transformLonLatArrayToProjected` keeps the plain shape
+and gives `null` for a row whose unit is not the metre.
 
 The transformer gives `null` for a `geoBasis` other than `{ kind: 'lonlat_deg', axisOrder: 'lon-lat' }`
 and for an id that is not among the rows, which is contract (7) "untransformable in the domain sense".
@@ -180,8 +213,9 @@ of `selected.worldFile` (`xScale * yScale - xSkew * ySkew < 0`).
 
 | value | meaning |
 |---|---|
-| `ranked[].rmsMeters` / `selected.rmsMeters` | **the pre-shear basic RMS used for the ranking** |
+| `ranked[].rmsMeters` / `selected.rmsMeters` | **the pre-shear basic RMS used for the ranking**, in metres |
 | `selected.worldFile` / `selected.qualityGate` | **the final return of Daedalus for the same candidate** (which may include an adopted affine) |
+| `selected.unit` / `ranked[].unit` | **the linear unit of that candidate's coordinates**; `selected.worldFile` is in it, `rmsMeters` is not |
 
 Therefore, when `selected.worldFile` is affine, `selected.rmsMeters` is not the residual of that
 worldFile. There is no API that exposes the final RMS under a different name.
@@ -248,8 +282,6 @@ decision to persist or adopt is the responsibility of the Editor, not of the lib
   synchronously cannot be interrupted, because the timer cannot fire. The transformer of Atlas
   (`createCandidateTransformer`) returns a Promise, so the limit applies to its asynchronous waits (such
   as the initialization of the engine), but not to the synchronous transformation work inside it.
-- **Units**: the transformer output of a successful candidate is fixed to metres. Handling of feet /
-  native units is not supported.
 - **Equivalent candidates**: a catalog can contain CRSs whose identifiers differ but whose projection
   definition (PROJ string) is the same (for example `EPSG:2448`, `EPSG:6674` and `ESRI:112206`). They give
   exactly the same estimate, so their order in `ranked` is decided by the identity order. There is no API

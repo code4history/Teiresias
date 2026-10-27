@@ -11,7 +11,7 @@
  * 直接 import する（設計 K14 / 設計レビュー INF-5 の承認済み手法）。
  */
 import { fitWorldFile } from '@c4h/daedalus';
-import type { FitResult, FitStatus, FitWarning, GcpPair, GeoBasis, QualityGate } from '@c4h/daedalus';
+import type { FitResult, FitStatus, FitWarning, GcpPair, GeoBasis, QualityGate, WorldFile } from '@c4h/daedalus';
 
 import type {
   CandidateCrs,
@@ -21,6 +21,7 @@ import type {
   EstimateOptions,
   EstimationFailure,
   EstimationResult,
+  LinearUnit,
 } from './types.js';
 
 /** 仕様正本 v0.3 の既定 epsilon（m）。Daedalus の gate と揃える。 */
@@ -38,7 +39,8 @@ const FAILURE_MESSAGE_MAX_LENGTH = 500;
 
 /**
  * Daedalus へ渡す basis は常にこれ（設計 K7）。
- * transformer の成功出力は Cycle 1 では metre の projected `[easting, northing]` と解釈する。
+ * transformer の成功出力は metre に換算した projected `[easting, northing]` として当てはめる
+ * （`{ points, unit }` は `metresPerUnit` 倍して metre に直す）。
  * 入力側 `geoBasis` をそのまま Daedalus へ渡してはならない。
  */
 const DAEDALUS_TARGET_BASIS: GeoBasis = { kind: 'planar_xy', axisOrder: 'xy', unit: 'm' };
@@ -297,6 +299,67 @@ function describePointListViolation(value: unknown, expectedLength: number): str
   return null;
 }
 
+/**
+ * 成功出力を metre の点列へ正規化する。
+ *
+ * - plain な配列は従来どおり metre の `[easting, northing]`（単位は `{ name: 'metre', metresPerUnit: 1 }`）。
+ * - `{ points, unit }` は `unit` を検査し（`name` が空でない文字列・`metresPerUnit` が正の有限値）、
+ *   `points` を `metresPerUnit` 倍して metre に直す。GCP と holdout は同じ倍率で換算される。
+ *
+ * 契約違反なら `adapter-contract-failure` の message になる理由を返す。
+ */
+function normalizeSuccessOutput(
+  value: unknown,
+  expectedLength: number,
+): { points: Array<[number, number]>; unit: LinearUnit } | { violation: string } {
+  if (typeof value === 'object' && value !== null && !Array.isArray(value) && 'points' in value) {
+    const candidate = value as { points: unknown; unit: unknown };
+    const unit = candidate.unit;
+    if (!isLinearUnit(unit)) return { violation: 'invalid unit' };
+    const violation = describePointListViolation(candidate.points, expectedLength);
+    if (violation !== null) return { violation };
+    const scale = unit.metresPerUnit;
+    return {
+      points: (candidate.points as Array<[number, number]>).map(([easting, northing]): [number, number] => [
+        easting * scale,
+        northing * scale,
+      ]),
+      unit: { name: unit.name, metresPerUnit: scale },
+    };
+  }
+  const violation = describePointListViolation(value, expectedLength);
+  if (violation !== null) return { violation };
+  return { points: value as Array<[number, number]>, unit: { name: 'metre', metresPerUnit: 1 } };
+}
+
+/** `LinearUnit` の契約（空でない `name`・正の有限の `metresPerUnit`）を満たすか。 */
+function isLinearUnit(value: unknown): value is LinearUnit {
+  if (typeof value !== 'object' || value === null) return false;
+  const unit = value as { name?: unknown; metresPerUnit?: unknown };
+  return (
+    typeof unit.name === 'string' &&
+    unit.name.length > 0 &&
+    typeof unit.metresPerUnit === 'number' &&
+    Number.isFinite(unit.metresPerUnit) &&
+    unit.metresPerUnit > 0
+  );
+}
+
+/**
+ * worldFile の 6 値をすべて `metresPerUnit` で割る。Daedalus の worldFile は pixel → metre の
+ * 写像であり、線形なので 6 値とも同じ倍率で pixel → 候補の単位の写像に直せる。
+ */
+function toCandidateUnits(worldFile: WorldFile, metresPerUnit: number): WorldFile {
+  return {
+    xScale: worldFile.xScale / metresPerUnit,
+    xSkew: worldFile.xSkew / metresPerUnit,
+    xOrigin: worldFile.xOrigin / metresPerUnit,
+    ySkew: worldFile.ySkew / metresPerUnit,
+    yScale: worldFile.yScale / metresPerUnit,
+    yOrigin: worldFile.yOrigin / metresPerUnit,
+  };
+}
+
 /** throw / reject された値を message にする（500 文字で切る）。 */
 function messageOf(error: unknown): string {
   return truncateMessage(error instanceof Error ? error.message : String(error));
@@ -376,6 +439,8 @@ async function invokeTransformer(
 interface UsableCandidate extends RankableCandidate {
   basicRmsMeters: number;
   fit: FitResult;
+  /** その候補の座標の単位（`fit.worldFile` は metre の写像）。 */
+  unit: LinearUnit;
 }
 
 /** 1 回の `fitWorldFile` の評価結果（候補ループの内部表現）。 */
@@ -561,13 +626,14 @@ export async function estimateCrs(
       continue;
     }
 
-    const violation = describePointListViolation(transformed, geoPoints.length);
-    if (violation !== null) {
-      // 非配列・長さ不一致・非有限出力は adapter contract failure
-      recordFailure(id, 'adapter-contract-failure', violation);
+    // plain な配列は metre、`{ points, unit }` は metre へ換算してから当てはめる
+    const normalized = normalizeSuccessOutput(transformed, geoPoints.length);
+    if ('violation' in normalized) {
+      // 非配列・不正な unit・長さ不一致・非有限出力は adapter contract failure
+      recordFailure(id, 'adapter-contract-failure', normalized.violation);
       continue;
     }
-    const points = transformed as Array<[number, number]>;
+    const { points, unit } = normalized;
     const gcpPoints = points.slice(0, gcps.length);
 
     const transformedGcps: GcpPair[] = gcps.map((gcp, index) => ({
@@ -617,6 +683,7 @@ export async function estimateCrs(
       score,
       basicRmsMeters,
       fit,
+      unit,
       ...(candidate.datumFamily === undefined ? {} : { datumFamily: candidate.datumFamily }),
     });
   }
@@ -629,6 +696,7 @@ export async function estimateCrs(
     code: entry.code,
     score: entry.score,
     rmsMeters: entry.basicRmsMeters,
+    unit: entry.unit,
   }));
 
   const hasTimeout = timedOut;
@@ -673,7 +741,12 @@ export async function estimateCrs(
     selected: {
       identity: { authority: head.authority, code: head.code },
       // selected.worldFile / qualityGate は同じ候補に対する Daedalus の最終返却である（設計 K10）
-      worldFile: head.fit.worldFile as NonNullable<FitResult['worldFile']>,
+      // worldFile は pixel → その候補の単位の写像に直す（metre の候補は 1 で割るだけ）
+      worldFile: toCandidateUnits(
+        head.fit.worldFile as NonNullable<FitResult['worldFile']>,
+        head.unit.metresPerUnit,
+      ),
+      unit: head.unit,
       score: head.score,
       // selected.rmsMeters は ranking に用いた shear 前 basic RMS である（設計 K10）
       rmsMeters: head.basicRmsMeters,

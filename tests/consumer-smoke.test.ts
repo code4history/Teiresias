@@ -9,12 +9,16 @@ import { SCENES } from '../scripts/consumer-smoke.mjs';
 
 type Row = { id: string; proj4: string };
 type Ranked = { authority: string; code: string };
+type Selected = {
+  worldFile: { yScale: number };
+  unit: { name: string; metresPerUnit: number };
+};
 type Scene = {
   id: string;
   truthId: string;
   pixelSpec: { metresPerPixel: number; yDown: boolean };
   check: (
-    result: { ranked: Ranked[]; selected: { worldFile: { yScale: number } } | null },
+    result: { ranked: Ranked[]; selected: Selected | null },
     candidates: Row[],
   ) => { ok: boolean; reason: string; k?: number };
 };
@@ -33,6 +37,7 @@ const candidates: Row[] = [
   { id: 'EPSG:6674', proj4: 'same' },
   { id: 'ESRI:112206', proj4: 'same' },
 ];
+const metreUnit = { name: 'metre', metresPerUnit: 1 };
 const ranked = (ids: string[]): Ranked[] =>
   ids.map((id) => {
     const [authority, code] = id.split(':');
@@ -40,12 +45,21 @@ const ranked = (ids: string[]): Ranked[] =>
   });
 
 describe('consumer-smoke の場面', () => {
-  it('(a)(b)(c) の 3 場面を持ち、(a) は y 上向き・(b)(c) は y 下向き', () => {
-    expect(scenes.map((s) => s.id)).toEqual(['a-y-up', 'b-y-down', 'c-y-down-yscale-negative']);
+  it('(a)〜(c) は metre の真値で (a) だけ y 上向き、(d) は格子の単位の真値で y 下向き', () => {
+    expect(scenes.map((s) => s.id)).toEqual([
+      'a-y-up',
+      'b-y-down',
+      'c-y-down-yscale-negative',
+      'd-utjcp-y-down',
+    ]);
     expect(byId('a-y-up').pixelSpec.yDown).toBe(false);
     expect(byId('b-y-down').pixelSpec.yDown).toBe(true);
     expect(byId('c-y-down-yscale-negative').pixelSpec.yDown).toBe(true);
-    for (const scene of scenes) expect(scene.truthId).toBe('EPSG:6674');
+    expect(byId('d-utjcp-y-down').pixelSpec.yDown).toBe(true);
+    for (const scene of scenes.filter((s) => s.id !== 'd-utjcp-y-down')) {
+      expect(scene.truthId).toBe('EPSG:6674');
+    }
+    expect(byId('d-utjcp-y-down').truthId).toBe('UTJCP:ZONE-B');
   });
 
   it('上位 k 件が縮退クラスと一致すれば真で、k は実行時に数える', () => {
@@ -74,8 +88,31 @@ describe('consumer-smoke の場面', () => {
 
   it('(c) は selected の yScale が負のときだけ真', () => {
     const scene = byId('c-y-down-yscale-negative');
-    expect(scene.check({ ranked: [], selected: { worldFile: { yScale: -0.5 } } }, candidates).ok).toBe(true);
-    expect(scene.check({ ranked: [], selected: { worldFile: { yScale: 0.5 } } }, candidates).ok).toBe(false);
+    expect(scene.check({ ranked: [], selected: { worldFile: { yScale: -0.5 }, unit: metreUnit } }, candidates).ok).toBe(
+      true,
+    );
+    expect(scene.check({ ranked: [], selected: { worldFile: { yScale: 0.5 }, unit: metreUnit } }, candidates).ok).toBe(
+      false,
+    );
+    expect(scene.check({ ranked: [], selected: null }, candidates).ok).toBe(false);
+  });
+
+  it('(d) は ranked[0] が格子の候補で selected.unit が yard のときだけ真', () => {
+    const scene = byId('d-utjcp-y-down');
+    const yardUnit = { name: 'yard (Japan City Plans)', metresPerUnit: 0.9143985307444408 };
+    const selected = { worldFile: { yScale: -10 }, unit: yardUnit };
+    const onTop = ranked(['UTJCP:ZONE-B', 'EPSG:6674']);
+
+    const verdict = scene.check({ ranked: onTop, selected }, candidates);
+    expect(verdict.ok).toBe(true);
+    // reason には両方の実値を入れる（どちらが外れたかを 1 行で分かるようにする）
+    expect(verdict.reason).toContain('UTJCP:ZONE-B');
+    expect(verdict.reason).toContain('0.9143985307444408');
+
+    expect(scene.check({ ranked: ranked(['EPSG:6674', 'UTJCP:ZONE-B']), selected }, candidates).ok).toBe(false);
+    expect(scene.check({ ranked: onTop, selected: { worldFile: { yScale: -10 }, unit: metreUnit } }, candidates).ok).toBe(
+      false,
+    );
     expect(scene.check({ ranked: [], selected: null }, candidates).ok).toBe(false);
   });
 });
