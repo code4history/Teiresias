@@ -1,0 +1,31 @@
+# CI-only pnpm settings. The workflows copy this file to pnpm-workspace.yaml right
+# before `pnpm install --frozen-lockfile`.
+#
+# Why it is not committed as pnpm-workspace.yaml:
+#   pnpm 11 reads allowBuilds, minimumReleaseAgeExclude and overrides only from
+#   pnpm-workspace.yaml (not from .npmrc or the package.json "pnpm" field). A
+#   pnpm-workspace.yaml at the repository root would also make this directory a
+#   workspace root during local development, where the repository is used inside a
+#   larger workspace. CI clones the repository on its own, so the copy is harmless
+#   there. For a local install on its own, copy it the same way first, with Atlas and
+#   Daedalus checked out next to this repository (../Atlas, ../Daedalus).
+#
+# Where the allowBuilds list comes from: running `pnpm install` with pnpm 11.27.0,
+#   CI=true, lifecycle scripts enabled and no node_modules fails with
+#   ERR_PNPM_IGNORED_BUILDS for the packages below (pnpm 11 sets strictDepBuilds to
+#   true by default). Re-measure the same way when dependencies change.
+
+allowBuilds:
+  esbuild: true
+
+# Our own packages are published by us, so they are exempt from the 24-hour quarantine
+# that pnpm 11 applies by default (minimumReleaseAge=1440). Third-party packages keep it.
+minimumReleaseAgeExclude:
+  - "@maplat/*"
+  - "@c4h/*"
+
+overrides:
+  # Until Atlas and Daedalus are on npm, resolve them from the sibling checkouts.
+  # package.json keeps the npm ranges, so the published package never carries link:.
+  "@c4h/daedalus": "link:../Daedalus"
+  "@c4h/atlas": "link:../Atlas"

@@ -30,7 +30,6 @@ import { describe, expect, it } from 'vitest';
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
 const packageRoot = join(testsDir, '..');
-const daedalusRoot = join(packageRoot, '..', 'Daedalus');
 
 const readText = (...segments: string[]): Promise<string> =>
   readFile(join(packageRoot, ...segments), 'utf8');
@@ -218,12 +217,15 @@ describe('m3-t1/AC-12: ワークフローの静的検査（CI の検証ではな
       'pnpm run verify:demo',
       'pnpm run verify:demo-bundle',
       'path: ./Teiresias/dist-demo',
-      'actions/configure-pages@v5',
-      'actions/upload-pages-artifact@v3',
-      'actions/deploy-pages@v4',
+      'cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml',
+      'pnpm install --frozen-lockfile',
     ]) {
       expect(deploy).toContain(needle);
     }
+    // Pages の action は 40 桁の SHA で固定し、系列をタグのコメントで残す
+    expect(deploy).toMatch(/actions\/configure-pages@[0-9a-f]{40} # v5\b/);
+    expect(deploy).toMatch(/actions\/upload-pages-artifact@[0-9a-f]{40} # v3\b/);
+    expect(deploy).toMatch(/actions\/deploy-pages@[0-9a-f]{40} # v4\b/);
     // 起動ブランチの取り違え検出
     expect(deploy).not.toContain('- main');
     // 兄弟の ref は固定せず、select-sibling-ref.mjs が選ぶ
@@ -232,9 +234,15 @@ describe('m3-t1/AC-12: ワークフローの静的検査（CI の検証ではな
     expect(deploy).not.toContain('Cross-Origin-Opener-Policy');
   });
 
-  it('Teiresias test.yml が兄弟 checkout を持ち、ブランチ非限定である', async () => {
+  /**
+   * 「ci 設定の overrides に兄弟の link: が在る ⇔ test.yml が兄弟を checkout する」を 1 つの
+   * 不変条件にする。release の枝で link: を外したら、兄弟の checkout も外す（外さなければ赤）。
+   */
+  it('Teiresias test.yml は link: の override があるときだけ兄弟 checkout を持ち、ブランチ非限定である', async () => {
     const ci = await readText('.github', 'workflows', 'test.yml');
-    for (const needle of [
+    const ciSettings = await readText('ci', 'pnpm-workspace.ci.yaml');
+    const linksSiblings = /^\s+"@c4h\/(daedalus|atlas)":\s*"link:/m.test(ciSettings);
+    const siblingNeedles = [
       'path: Teiresias',
       'repository: code4history/Daedalus',
       'repository: code4history/Atlas',
@@ -243,6 +251,16 @@ describe('m3-t1/AC-12: ワークフローの静的検査（CI の検証ではな
       'ref: ${{ steps.sibling.outputs.atlas }}',
       'working-directory: Teiresias',
       'cache-dependency-path',
+    ];
+    if (linksSiblings) {
+      for (const needle of siblingNeedles) expect(ci).toContain(needle);
+    } else {
+      expect(ci).not.toContain('repository: code4history/');
+    }
+    for (const needle of [
+      'cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml',
+      'pnpm install --frozen-lockfile',
+      'pnpm run smoke:consumer',
       'pnpm run test',
       'pnpm run typecheck',
       'pnpm run test:types',
@@ -259,21 +277,6 @@ describe('m3-t1/AC-12: ワークフローの静的検査（CI の検証ではな
     expect(ci).not.toContain('ref: master');
   });
 
-  it('Daedalus test.yml は単体 checkout で完結し、ブランチ非限定である', async () => {
-    // ⚠️ 既知の妥協（設計 §9.1a の註 / R7 / §15-12）: 3 repo を分離した後、この相対パス
-    // 参照は解決不能になる。Daedalus 側にテストを新設しないのは `Daedalus/tests/**` が
-    // m0 凍結だからである。分離後は Daedalus 自身の CI が唯一の検査になる。
-    const daedalusCi = await readFile(
-      join(daedalusRoot, '.github', 'workflows', 'test.yml'),
-      'utf8',
-    );
-    for (const needle of ['pnpm run test', 'pnpm run typecheck', 'pnpm run test:types', 'pnpm run build']) {
-      expect(daedalusCi).toContain(needle);
-    }
-    expect(daedalusCi).not.toContain('branches:');
-    // Daedalus は依存 0 件 ∴ 兄弟 checkout を持たない（設計 §6.4 末尾）
-    expect(daedalusCi).not.toContain('repository: code4history/');
-  });
 });
 
 /**

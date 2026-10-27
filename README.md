@@ -11,6 +11,17 @@
 
 日本語のREADMEは[こちら](./README.ja.md)。
 
+## Installation
+
+Requires Node.js >= 22 (or a browser through a bundler). The candidates usually come from
+[`@c4h/atlas`](https://github.com/code4history/Atlas) (see "Using with Atlas" below).
+
+<!-- release-pinned:start -->
+```sh
+pnpm add @c4h/teiresias @c4h/atlas
+```
+<!-- release-pinned:end -->
+
 ## Public API
 
 The `exports` of `package.json` only exposes the public root `"."`. Only `estimateCrs` and the public
@@ -253,18 +264,30 @@ decision to persist or adopt is the responsibility of the Editor, not of the lib
 
 ## Development
 
+Check out [Atlas](https://github.com/code4history/Atlas) and
+[Daedalus](https://github.com/code4history/Daedalus) next to this repository (`../Atlas`, `../Daedalus`).
+Until they are on npm, `ci/pnpm-workspace.ci.yaml` resolves `@c4h/atlas` and `@c4h/daedalus` to those
+checkouts. Copy it before installing, in this repository and in each sibling (do not commit the copies):
+
 ```bash
-pnpm --ignore-workspace install --ignore-scripts
-pnpm --ignore-workspace run typecheck
-pnpm --ignore-workspace run test:types
-pnpm --ignore-workspace run test
-pnpm --ignore-workspace run build
-pnpm --ignore-workspace run coverage
+(cd ../Daedalus && cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml && pnpm install --frozen-lockfile && pnpm run build)
+(cd ../Atlas && cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml && pnpm install --frozen-lockfile && pnpm run build)
+cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml && pnpm install --frozen-lockfile
+pnpm run typecheck
+pnpm run test:types
+pnpm run test
+pnpm run build
+pnpm run smoke:consumer
+pnpm run coverage
 ```
 
-Because `@c4h/daedalus` resolves `dist` through its exports, build Daedalus first. In a worktree of the
-parent repository, a bare `pnpm run <script>` regenerates the parent `pnpm-lock.yaml` in a degenerate
-form, so **always add `--ignore-workspace`**.
+Because `@c4h/daedalus` resolves `dist` through its exports, build Daedalus first.
+`pnpm run smoke:consumer` packs the three packages, installs the tarballs into an empty directory and
+runs the estimate through the public imports only.
+
+`pnpm publish` is guarded by `prepublishOnly` (test, typecheck, test:types, test:types:atlas, build,
+verify:demo and verify:demo-bundle). Releases are published from GitHub Actions
+(`.github/workflows/publish.yml`). Changes are listed in [CHANGELOG.md](./CHANGELOG.md).
 
 ### Demo
 
@@ -274,15 +297,15 @@ the `dist` of `@c4h/atlas`, **build Atlas first as well**.
 
 ```bash
 # development server
-pnpm --ignore-workspace run dev
+pnpm run dev
 
 # build and verify the Pages artifact (GITHUB_PAGES=true makes the base /Teiresias/)
-pnpm --ignore-workspace run verify:demo
-pnpm --ignore-workspace run verify:demo-bundle
+pnpm run verify:demo
+pnpm run verify:demo-bundle
 
 # check it in a local browser (use it together with a build whose base is "/")
-pnpm --ignore-workspace run build:demo
-pnpm --ignore-workspace run preview
+pnpm run build:demo
+pnpm run preview
 ```
 
 Because proj-wasm loads a Worker and a WASM binary, **it does not work over `file://`** (serve it over HTTP).

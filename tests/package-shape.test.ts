@@ -1,8 +1,9 @@
 /**
  * package 形状と依存境界の機械検証（m1-t1 設計 §8）。
  *
- * - AC-m1-1: `@c4h/daedalus` が `link:../Daedalus` の runtime dependency で、Atlas は
- *   runtime dependency でなく、`exports` は public root のみ。`private` / `license` 不変。
+ * - AC-m1-1: `@c4h/daedalus` が npm の初版の範囲の runtime dependency で、Atlas は
+ *   runtime dependency でなく、`exports` は public root のみ。公開の設定（`private: false` 等）。
+ *   兄弟の `link:` は `ci/pnpm-workspace.ci.yaml` の overrides だけに置く。
  * - AC-T2: Teiresias の `src` / `tests` 全域に Daedalus testkit / dist への禁止 import が 0 件。
  *   **手動 grep ではなく fs 全域走査 assert として結線する**（`outer rule-0012` の趣旨。
  *   設計レビュー第1ラウンド MIN-3）。
@@ -10,7 +11,7 @@
  *   （`outer rule-0018`）、build 成果物に tests/fixtures が出ないこと。
  */
 import { createHash } from 'node:crypto';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -18,11 +19,24 @@ import { describe, expect, it } from 'vitest';
 
 const testsDir = dirname(fileURLToPath(import.meta.url));
 const packageRoot = resolve(testsDir, '..');
-const daedalusRoot = resolve(packageRoot, '..', 'Daedalus');
+
+/**
+ * 依存の実体（兄弟の symlink でも npm の版でも在る）。兄弟の checkout を前提にしない
+ * （兄弟の無い publish の verify job や release の枝でも同じ検査が成り立つ）。
+ */
+function installedPackageJson(name: string): { version: string; devDependencies?: Record<string, string> } {
+  const dir = realpathSync(join(packageRoot, 'node_modules', ...name.split('/')));
+  return JSON.parse(readFileSync(join(dir, 'package.json'), 'utf8'));
+}
+
+/** `^1.0.0` か `^1.0.0-rc.<n>`（初版とその RC）。 */
+const FIRST_RELEASE_RANGE = /^\^1\.0\.0(-rc\.[0-9]+)?$/;
 
 const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), 'utf8')) as {
   name: string;
   private: boolean;
+  publishConfig?: { access?: string };
+  files?: string[];
   license: string;
   type: string;
   main: string;
@@ -31,6 +45,7 @@ const packageJson = JSON.parse(readFileSync(join(packageRoot, 'package.json'), '
   scripts: Record<string, string>;
   dependencies: Record<string, string>;
   devDependencies: Record<string, string>;
+  peerDependencies?: Record<string, string>;
 };
 
 const tsconfigJson = JSON.parse(readFileSync(join(packageRoot, 'tsconfig.json'), 'utf8')) as {
@@ -78,8 +93,36 @@ function sha256OfFile(path: string): string {
 }
 
 describe('AC-m1-1: runtime dependency と公開 surface', () => {
-  it('@c4h/daedalus が dependencies の link:../Daedalus である', () => {
-    expect(packageJson.dependencies['@c4h/daedalus']).toBe('link:../Daedalus');
+  it('@c4h/daedalus は npm の初版の範囲で、依存の欄に link: / file: / workspace: が無い', () => {
+    expect(packageJson.dependencies['@c4h/daedalus']).toMatch(FIRST_RELEASE_RANGE);
+    const specs = [
+      ...Object.values(packageJson.dependencies),
+      ...Object.values(packageJson.devDependencies),
+      ...Object.values(packageJson.peerDependencies ?? {}),
+    ];
+    expect(specs.filter((spec) => /^(link|file|workspace):/.test(spec))).toEqual([]);
+  });
+
+  it('ci/pnpm-workspace.ci.yaml の @c4h/* の override は兄弟の link: だけ（無くてもよい）', () => {
+    const ciPath = join(packageRoot, 'ci', 'pnpm-workspace.ci.yaml');
+    expect(existsSync(ciPath)).toBe(true);
+    const overrides: Record<string, string> = {};
+    let inBlock = false;
+    for (const line of readFileSync(ciPath, 'utf8').split('\n')) {
+      if (/^overrides:\s*$/.test(line)) { inBlock = true; continue; }
+      if (!inBlock) continue;
+      if (line.trim() !== '' && !/^[\s#]/.test(line)) { inBlock = false; continue; }
+      const m = line.match(/^\s+"?([^"\s:#][^"\s:]*)"?:\s*"([^"]+)"/);
+      if (m) overrides[m[1]] = m[2];
+    }
+    const allowed: Record<string, string> = {
+      '@c4h/daedalus': 'link:../Daedalus',
+      '@c4h/atlas': 'link:../Atlas',
+    };
+    for (const [name, spec] of Object.entries(overrides)) {
+      if (!name.startsWith('@c4h/')) continue;
+      expect(allowed[name], name).toBe(spec);
+    }
   });
 
   /**
@@ -101,8 +144,9 @@ describe('AC-m1-1: runtime dependency と公開 surface', () => {
     ).toEqual([]);
   });
 
-  it('Atlas は devDependency としてのみ存在し、link:../Atlas で解決する（m2a-t1）', () => {
-    expect(packageJson.devDependencies['@c4h/atlas']).toBe('link:../Atlas');
+  it('Atlas は devDependency としてのみ存在し、npm の初版の範囲である', () => {
+    expect(packageJson.devDependencies['@c4h/atlas']).toMatch(FIRST_RELEASE_RANGE);
+    expect(packageJson.dependencies['@c4h/atlas']).toBeUndefined();
   });
 
   it('Teiresias src は Atlas を一切参照しない（fs 全域走査。C7 engine 直参照禁止）', () => {
@@ -130,11 +174,13 @@ describe('AC-m1-1: runtime dependency と公開 surface', () => {
     expect(packageJson.types).toBe('./dist/index.d.ts');
   });
 
-  it('private / license / name / type は m1-t1 で変更しない', () => {
+  it('name・license・type・公開の設定', () => {
     expect(packageJson.name).toBe('@c4h/teiresias');
-    expect(packageJson.private).toBe(true);
     expect(packageJson.license).toBe('MIT');
     expect(packageJson.type).toBe('module');
+    expect(packageJson.private).toBe(false);
+    expect(packageJson.publishConfig?.access).toBe('public');
+    expect(packageJson.files).toEqual(['dist', 'src', 'README.md', 'README.ja.md']);
   });
 
   it('公開 root export の runtime surface は estimateCrs だけで、内部 helper を漏出させない', async () => {
@@ -262,10 +308,11 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
     );
   });
 
-  it('devDependencies は Daedalus 正史と同じ major に揃っている（設計 K13）', () => {
-    const daedalusPackageJson = JSON.parse(
-      readFileSync(join(daedalusRoot, 'package.json'), 'utf8'),
-    ) as { devDependencies: Record<string, string> };
+  it('devDependencies は入っている Daedalus と同じ major に揃っている（設計 K13）', () => {
+    // 兄弟の checkout ではなく node_modules の実体を読む。読めなければ赤（skip しない）。
+    const daedalusPackageJson = installedPackageJson('@c4h/daedalus') as {
+      devDependencies: Record<string, string>;
+    };
     for (const name of ['typescript', 'vitest', '@vitest/coverage-v8', '@types/node']) {
       expect(majorOf(packageJson.devDependencies[name])).toBe(
         majorOf(daedalusPackageJson.devDependencies[name]),
@@ -321,17 +368,14 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
   });
 });
 
-describe('AC-T1 (b): fixture コピーの SHA-256 三者一致', () => {
+describe('AC-T1 (b): fixture コピーの SHA-256 が規定の値と一致する（Daedalus 側は Daedalus の tests/mock-contract-sha.test.ts）', () => {
   /** 契約文書が定める fixture の実測 SHA-256（fixtureVersion 1.0.1）。 */
   const SPECIFIED_SHA256 =
     '5da3d253e46a0dc6f8710432fc0783a261fbb35ca0c47757b0b204a48fa85495';
-  const copySource = join(daedalusRoot, 'src', `${'testkit'}`, 'mockContractFixture.ts');
   const copyTarget = join(packageRoot, 'tests', 'fixtures', 'mockContractFixture.ts');
 
-  it('コピー元・コピー先・規定 SHA の 3 者が一致する', () => {
-    expect(sha256OfFile(copySource)).toBe(SPECIFIED_SHA256);
+  it('コピーが規定 SHA と一致する（コピー元は Daedalus の側が同じ定数で検査する）', () => {
     expect(sha256OfFile(copyTarget)).toBe(SPECIFIED_SHA256);
-    expect(readFileSync(copyTarget)).toEqual(readFileSync(copySource));
   });
 
   it('コピー先は import を一切持たない純定数ファイルである（契約文書 §5.2）', () => {
