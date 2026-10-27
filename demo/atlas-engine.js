@@ -73,6 +73,8 @@ export function loadEngine() {
  *               （`bboxPaddingDeg: 0.7`。E2E の `catalogWide()` と同一設定）。
  * - `catalog` … padding を指定しない**既定カタログ全件**（実運用どおりの呼び出し）。
  *               縮退クラス `EPSG:2448 = EPSG:6674 = ESRI:112206` を含む。
+ * - `catalog-custom` … 既定カタログ全件に custom の定義（歴史グリッド）を足す。
+ *               custom の帯は陸上だけの絞り込みでは候補に残らないため `onshoreOnly: false` で引く。
  */
 export async function loadCandidates(mode, scene = DEFAULT_SCENE) {
   const { listProjectedCrsFromProjWasm } = await loadAtlasRuntime();
@@ -85,6 +87,15 @@ export async function loadCandidates(mode, scene = DEFAULT_SCENE) {
     });
     const byId = new Map(wide.map((row) => [row.id, row]));
     return scene.zones.filter((id) => byId.has(id)).map((id) => byId.get(id));
+  }
+
+  if (mode === 'catalog-custom') {
+    return listProjectedCrsFromProjWasm({
+      extent: scene.extent,
+      area: 'Japan',
+      onshoreOnly: false,
+      includeCustomProjections: true,
+    });
   }
 
   return listProjectedCrsFromProjWasm({
@@ -101,10 +112,15 @@ export async function loadCandidates(mode, scene = DEFAULT_SCENE) {
  *
  * - `geoBasis` が `lonlat_deg` / lon-lat 順でなければ `null`、知らない id も `null`
  *   （契約 (7)「業務的変換不能」）。実装側の失敗は throw で伝わる（契約 (7)）。
- * - `rows` は呼び出し時に写す（後から `rows` を書き換えても結果は変わらない）。
+ * - `rows` は呼び出し時に写す（後から `rows` を書き換えても結果は変わらない）。`unit` も写す —
+ *   落とすと、単位が metre でない定義（歴史グリッドの yard）が「変換できなかった候補」になる。
  */
 export function makeTransformer(rows) {
-  const snapshot = rows.map((row) => ({ id: row.id, proj4: row.proj4 }));
+  const snapshot = rows.map((row) => ({
+    id: row.id,
+    proj4: row.proj4,
+    ...(row.unit ? { unit: { ...row.unit } } : {}),
+  }));
   const transformerPromise = loadAtlasRuntime().then(({ createCandidateTransformer }) =>
     createCandidateTransformer(snapshot),
   );
@@ -114,17 +130,21 @@ export function makeTransformer(rows) {
 /**
  * 場面の真値（`scene.truthId`）へ場面の GCP（`scene.gcpLonLat`）を投影する
  * （pixel 格子の元になる座標）。`scene` を省略すると京都。
+ *
+ * 真値が metre でない定義（歴史グリッドの yard）でも座標を作れるよう、単位つきの
+ * 変換の点列を使う。返す座標の単位は真値の行の単位であり、pixel 格子の縮尺はその単位の
+ * 10 単位/pixel である。
  */
 export async function projectTruth(rows, scene = DEFAULT_SCENE) {
-  const { transformLonLatArrayToProjected } = await loadAtlasRuntime();
+  const { transformLonLatToCandidate } = await loadAtlasRuntime();
   const truthId = scene.truthId;
   const truth = rows.find((row) => row.id === truthId);
   if (truth === undefined) {
     throw new Error(`候補カタログに真値 ${truthId} が含まれていない`);
   }
-  const projected = await transformLonLatArrayToProjected(truth, scene.gcpLonLat);
-  if (projected === null) {
+  const converted = await transformLonLatToCandidate(truth, scene.gcpLonLat);
+  if (converted === null) {
     throw new Error(`真値 ${truthId} への変換が null を返した`);
   }
-  return projected;
+  return converted.points;
 }

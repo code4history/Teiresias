@@ -97,6 +97,21 @@ const DEFINITION_VII =
   '+proj=tmerc +lat_0=36 +lon_0=135 +k=1 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs';
 const DEFINITION_TOKYO =
   '+proj=tmerc +lat_0=36 +lon_0=139.833333 +k=0.9999 +x_0=0 +y_0=0 +ellps=GRS80 +units=m +no_defs';
+const DEFINITION_HISTORICAL_B =
+  '+proj=pipeline +step +inv +proj=poly +lat_0=40.5 +lon_0=135 +x_0=914398.5307444408 +y_0=1828797.0614888816 +ellps=clrk66 +to_meter=0.9143985307444408';
+const DEFINITION_HISTORICAL_A =
+  '+proj=pipeline +step +inv +proj=poly +lat_0=40.5 +lon_0=143 +x_0=914398.5307444408 +y_0=1828797.0614888816 +ellps=clrk66 +to_meter=0.9143985307444408';
+const DEFINITION_HISTORICAL_C =
+  '+proj=pipeline +step +inv +proj=poly +lat_0=40.5 +lon_0=127 +x_0=914398.5307444408 +y_0=1828797.0614888816 +ellps=clrk66 +to_meter=0.9143985307444408';
+
+/**
+ * 歴史グリッドの単位（stub が返す）。実 engine の `UTJCP` の行と同じ値を使う
+ * （metre でない候補は `{ points, unit }` を返し、その単位が画面へ出る）。
+ */
+const HISTORICAL_UNIT = Object.freeze({
+  name: 'yard (Japan City Plans)',
+  metresPerUnit: 0.9143985307444408,
+});
 
 /** 変換できない（transformer が `null` を返す）候補。 */
 const UNTRANSFORMABLE_ID = 'EPSG:9991';
@@ -188,16 +203,106 @@ const EXTRA_CANDIDATE = {
   sy: SCALE * 1.5,
 };
 
-type StubRow = (typeof STUB_CANDIDATES)[number];
+/** 歴史グリッドの 3 帯（custom projection）。帯ごとに微妙に曲げが違い、真値の帯だけが厳密適合する。 */
+const HISTORICAL_ROW_B = {
+  id: 'UTJCP:ZONE-B',
+  authority: 'UTJCP',
+  code: 'ZONE-B',
+  sx: SCALE * 0.9,
+  sy: SCALE * 0.9,
+  bend: 5e-6,
+  proj4: DEFINITION_HISTORICAL_B,
+  unit: HISTORICAL_UNIT,
+};
+const HISTORICAL_ROW_A = {
+  id: 'UTJCP:ZONE-A',
+  authority: 'UTJCP',
+  code: 'ZONE-A',
+  sx: SCALE * 1.1,
+  sy: SCALE * 1.1,
+  bend: 7e-6,
+  proj4: DEFINITION_HISTORICAL_A,
+  unit: HISTORICAL_UNIT,
+};
+const HISTORICAL_ROW_C = {
+  id: 'UTJCP:ZONE-C',
+  authority: 'UTJCP',
+  code: 'ZONE-C',
+  sx: SCALE * 1.2,
+  sy: SCALE * 1.2,
+  bend: 9e-6,
+  proj4: DEFINITION_HISTORICAL_C,
+  unit: HISTORICAL_UNIT,
+};
+
+/**
+ * 歴史グリッドの場面（京都と同じ範囲）の候補。真値（`UTJCP:ZONE-B`）だけが等方スケールで、
+ * 単位は yard である。変換できない行と当てはめに使えない行を混ぜ、流れの 3 つの件数を
+ * 1 つずつ違える。
+ */
+const STUB_UTJCP_CANDIDATES = [
+  HISTORICAL_ROW_B,
+  { id: 'EPSG:6674', authority: 'EPSG', code: '6674', sx: SCALE, sy: SCALE, proj4: DEFINITION_VI },
+  {
+    id: SAME_DEFINITION_ID,
+    authority: 'EPSG',
+    code: '2448',
+    sx: SCALE * (1 + 5e-5),
+    sy: SCALE,
+    proj4: DEFINITION_VI,
+  },
+  {
+    id: DISCRIMINATION_AGAINST_ID,
+    authority: 'EPSG',
+    code: '6673',
+    sx: SCALE,
+    sy: SCALE * (1 + 1e-3),
+    proj4: DEFINITION_VI_EAST,
+  },
+  {
+    id: 'EPSG:6675',
+    authority: 'EPSG',
+    code: '6675',
+    sx: SCALE * (1 + 2e-3),
+    sy: SCALE,
+    proj4: DEFINITION_VII,
+  },
+  { id: UNTRANSFORMABLE_ID, authority: 'EPSG', code: '9991', sx: SCALE, sy: SCALE },
+  { id: UNFITTABLE_ID, authority: 'EPSG', code: '9992', sx: 0, sy: 0 },
+];
+
+type StubRow = (typeof STUB_CANDIDATES)[number] & {
+  unit?: { name: string; metresPerUnit: number };
+  bend?: number;
+};
 
 function projectWith(row: StubRow, points: ReadonlyArray<readonly [number, number]>) {
-  return points.map(([lon, lat]): [number, number] => [(lon - LON0) * row.sx, (lat - LAT0) * row.sy]);
+  const bend = row.bend ?? 0;
+  return points.map(([lon, lat]): [number, number] => {
+    const dx = lon - LON0;
+    const dy = lat - LAT0;
+    return [
+      dx * row.sx + bend * dx * row.sx * dy,
+      dy * row.sy + bend * dy * row.sy * dx,
+    ];
+  });
 }
 
-/** 場面と候補の集め方から stub の候補を決める（場面ごとに真値が違う）。 */
+/** 場面と候補の集め方から stub の候補を決める（場面ごとに真値が違い、custom は catalog-custom だけに足す）。 */
 function stubCandidatesFor(mode: string, scene: { id?: string } | undefined): StubRow[] {
-  const base = scene?.id === scenes.tokyo.id ? STUB_TOKYO_CANDIDATES : STUB_CANDIDATES;
-  return mode === 'zones' ? base : [...base, EXTRA_CANDIDATE];
+  const base: StubRow[] =
+    scene?.id === 'kyoto-utjcp'
+      ? [...STUB_UTJCP_CANDIDATES]
+      : scene?.id === scenes.tokyo.id
+        ? [...STUB_TOKYO_CANDIDATES]
+        : [...STUB_CANDIDATES];
+  if (mode === 'zones') return base;
+  if (mode === 'catalog') return [...base, EXTRA_CANDIDATE];
+  // catalog-custom: 既定カタログ全件 + custom の 3 帯（真値の帯を二重に足さない）。
+  const historicalExtras = [HISTORICAL_ROW_A, HISTORICAL_ROW_B, HISTORICAL_ROW_C].filter(
+    (row) => !base.some((entry) => entry.id === row.id),
+  );
+  return [...base, ...historicalExtras];
 }
 
 /**
@@ -223,7 +328,9 @@ function makeStubEngine() {
         if (UNTRANSFORMABLE_IDS.has(id)) return null;
         const target = byId.get(id);
         if (target === undefined) return null;
-        return projectWith(target, points);
+        const projected = projectWith(target, points);
+        // metre でない候補（歴史グリッド）は単位つきで返す（実 engine の adapter と同じ形）。
+        return target.unit === undefined ? projected : { points: projected, unit: { ...target.unit } };
       };
     }),
     // 真値の投影は**渡された場面**の GCP を使う（場面を取り違えれば値が変わる）。
@@ -524,6 +631,35 @@ function truthMarkOf(id: string): string | null {
   const row = rows.find((entry) => entry.children[1]?.textContent === id);
   if (row === undefined) return null;
   return row.children[truthColumnIndex()]?.textContent ?? '';
+}
+
+/** 順位の表の見出しの番号（見出しの文字列から引く。位置を直書きしない）。 */
+function columnIndexOf(header: string): number {
+  return Array.from(document.querySelectorAll('thead th')).findIndex((th) => th.textContent === header);
+}
+
+/** 順位の表の行から、ID で引いた行の指定の列のセルの中身。 */
+function cellOf(id: string, columnIndex: number): string | null {
+  const rows = Array.from(document.querySelectorAll('#ranked-body tr'));
+  const row = rows.find((entry) => entry.children[1]?.textContent === id);
+  if (row === undefined) return null;
+  return row.children[columnIndex]?.textContent ?? '';
+}
+
+/** 選択結果の詳細リスト（`dt` と `dd` の並び）から、用語の次の値を引く。 */
+function definitionOf(term: string): string | null {
+  const terms = Array.from(document.querySelectorAll('#selected-body dt'));
+  const dt = terms.find((entry) => entry.textContent === term);
+  if (dt === undefined) return null;
+  return dt.nextElementSibling?.textContent ?? null;
+}
+
+/** 画面の数の書式（`formatMeters` と同じ規則）。値を値のまま確かめるために使う。 */
+function formatMetersForTest(value: number): string {
+  if (!Number.isFinite(value)) return String(value);
+  if (value === 0) return '0';
+  if (Math.abs(value) < 1e-3 || Math.abs(value) >= 1e5) return value.toExponential(4);
+  return value.toFixed(4);
 }
 
 /** 板が実際にマーカーを掴むまで走査してドラッグし、掴めたかを返す（jsdom には寸法が無い）。 */
@@ -859,6 +995,156 @@ describe('手で操作したら中立に戻る（プリセットの印と見え�
 
     expect(demo.getRecalcCount()).toBe(recalcBefore + 1);
     expectNeutral();
+  });
+});
+
+describe('歴史グリッドの対比（historical-grid）の結線', () => {
+  beforeEach(() => {
+    mountPage();
+  });
+
+  async function bootAndPress(presetId: string, optionId: string) {
+    const engine = makeStubEngine();
+    const demo = initDemo({ engine });
+    await demo.whenSettled();
+    const button = document.querySelector(`button[data-preset="${presetId}:${optionId}"]`) as HTMLButtonElement;
+    expect(button).not.toBeNull();
+    button.dispatchEvent(new Event('click'));
+    await demo.whenSettled();
+    return { engine, demo };
+  }
+
+  it('historical-grid の A・B のボタンが、対比の文言どおりに並ぶ', async () => {
+    const demo = initDemo({ engine: makeStubEngine() });
+    await demo.whenSettled();
+
+    expect(document.querySelector('button[data-preset="historical-grid:a"]')?.textContent).toBe(
+      '現代の地図（VI 系で描いた）',
+    );
+    expect(document.querySelector('button[data-preset="historical-grid:b"]')?.textContent).toBe(
+      '戦前の市街図（歴史グリッド B 帯で描いた）',
+    );
+  });
+
+  it('A を押すと京都の場面と catalog-custom が engine へ渡り、流れは候補 9 → 変換 8 → 当てはめ 7 になる', async () => {
+    const { engine, demo } = await bootAndPress('historical-grid', 'a');
+
+    const loadCall = engine.loadCandidates.mock.calls.at(-1);
+    expect(loadCall?.[0]).toBe('catalog-custom');
+    expect(loadCall?.[1]?.id).toBe('kyoto');
+    const projectCall = engine.projectTruth.mock.calls.at(-1);
+    expect(projectCall?.[1]?.id).toBe('kyoto');
+
+    // stub の候補は 6 行 + 歴史グリッド 3 帯 = 9。
+    // 変換できない行が 1、当てはめに使えない行が 1 ∴ 9 → 8 → 7（3 つとも違う）。
+    expect(flowNumbers().slice(0, 3)).toEqual([9, 8, 7]);
+    expect(flowText()).toContain('EPSG:6674');
+
+    // A でも歴史グリッドは変換できている（変換不能の一覧に並ばない）
+    expect(demo.getState().scene.untransformableIds).not.toContain('UTJCP:ZONE-B');
+    expect(document.getElementById('untransformable')?.textContent ?? '').not.toContain('UTJCP:');
+  });
+
+  it('B を押すと kyoto-utjcp の場面と catalog-custom が engine へ渡り、流れは候補 9 → 変換 8 → 当てはめ 7 になる', async () => {
+    const { engine, demo } = await bootAndPress('historical-grid', 'b');
+
+    const loadCall = engine.loadCandidates.mock.calls.at(-1);
+    expect(loadCall?.[0]).toBe('catalog-custom');
+    expect(loadCall?.[1]?.id).toBe('kyoto-utjcp');
+    // 場面の範囲と GCP は京都と同じ（値の正本は demo/scenes.js）
+    expect(loadCall?.[1]?.extent).toEqual(scenes.kyoto.extent);
+    expect(loadCall?.[1]?.gcpLonLat).toEqual(scenes.kyoto.gcpLonLat);
+    const projectCall = engine.projectTruth.mock.calls.at(-1);
+    expect(projectCall?.[1]?.id).toBe('kyoto-utjcp');
+
+    // stub の候補は 7 行 + 歴史グリッド 2 帯 = 9。
+    // 変換できない行が 1、当てはめに使えない行が 1 ∴ 9 → 8 → 7（3 つとも違う）。
+    expect(flowNumbers().slice(0, 3)).toEqual([9, 8, 7]);
+    expect(flowText()).toContain('UTJCP:ZONE-B');
+
+    expect(demo.getState().scene.untransformableIds).not.toContain('UTJCP:ZONE-B');
+    expect(document.getElementById('untransformable')?.textContent ?? '').not.toContain('UTJCP:');
+  });
+
+  it('選択結果の world file の値の横に、その候補の単位の名前が出る', async () => {
+    const { demo } = await bootAndPress('historical-grid', 'b');
+    const scene = demo.getState().scene;
+
+    expect(scene.ranked[0].id).toBe('UTJCP:ZONE-B');
+    expect(definitionOf('unit')).toBe('yard (Japan City Plans)');
+    // 6 つの値も、その単位のままの数値が出ている
+    for (const key of ['xScale', 'ySkew', 'xSkew', 'yScale', 'xOrigin', 'yOrigin']) {
+      expect(definitionOf(key)).toBe(formatMetersForTest(scene.selected.worldFile[key]));
+    }
+    const selectedText = document.getElementById('selected-body')?.textContent ?? '';
+    expect(selectedText).toContain('yard (Japan City Plans)');
+    expect(selectedText).not.toContain('undefined');
+  });
+
+  it('順位の表に単位の列があり、行ごとにその候補の単位が出る', async () => {
+    const { demo } = await bootAndPress('historical-grid', 'b');
+    const scene = demo.getState().scene;
+
+    const unitColumn = columnIndexOf('単位');
+    expect(unitColumn).toBeGreaterThanOrEqual(0);
+    expect(cellOf('UTJCP:ZONE-B', unitColumn)).toBe('yard (Japan City Plans)');
+    expect(cellOf('EPSG:6674', unitColumn)).toBe('metre');
+    // 表の行数は当てはめた件数と一致する
+    expect(document.querySelectorAll('#ranked-body tr').length).toBe(scene.ranked.length);
+    expect(document.querySelectorAll('#ranked-body tr').length).toBe(7);
+  });
+});
+
+describe('1 位と比べた相手の rmsMeters の行', () => {
+  beforeEach(() => {
+    mountPage();
+  });
+
+  it('1 位と同じ定義の候補が 2 位に来ても、行には定義の違う最初の候補を出す', async () => {
+    // 既定の場面（京都）では、真値 EPSG:6674 と同じ proj4 を持つ EPSG:2448 が 2 位に来る。
+    // 行に出す相手はその同値の候補ではなく、定義の違う最初の候補 EPSG:6673 である。
+    const demo = initDemo({ engine: makeStubEngine() });
+    await demo.whenSettled();
+    const scene = demo.getState().scene;
+
+    // 前提: 1 位と同じ定義の候補が実際に 2 位に来ている
+    expect(scene.ranked[0].isTruth).toBe(true);
+    expect(scene.ranked[1].isSameDefinition).toBe(true);
+    expect(scene.ranked[1].id).toBe(SAME_DEFINITION_ID);
+    // 相手は同値の候補ではなく、定義の違う最初の候補である
+    expect(scene.discrimination.against).toBe('EPSG:6673');
+
+    const opponent = scene.ranked.find((entry) => entry.id === 'EPSG:6673');
+    expect(opponent).toBeDefined();
+    // 2 つの rms の値は違う数として出る
+    expect(formatMetersForTest(opponent!.rmsMeters)).not.toBe(
+      formatMetersForTest(scene.ranked[0].rmsMeters),
+    );
+
+    expect(document.getElementById('top-rms')?.textContent).toBe(
+      `1 位 ${scene.ranked[0].id} rmsMeters: ${formatMetersForTest(
+        scene.ranked[0].rmsMeters,
+      )} / 比べた相手 EPSG:6673 rmsMeters: ${formatMetersForTest(opponent!.rmsMeters)}`,
+    );
+  });
+
+  it('比べた相手が無いときは、相手の側に — を出す', async () => {
+    const base = makeStubEngine();
+    const onlyTruth = [STUB_CANDIDATES[0]];
+    const engine = {
+      loadEngine: base.loadEngine,
+      loadCandidates: vi.fn(async () => onlyTruth),
+      makeTransformer: base.makeTransformer,
+      projectTruth: base.projectTruth,
+    };
+    const demo = initDemo({ engine });
+    await demo.whenSettled();
+
+    const scene = demo.getState().scene;
+    expect(scene.discrimination.against).toBeNull();
+    expect(document.getElementById('top-rms')?.textContent).toBe(
+      `1 位 ${scene.ranked[0].id} rmsMeters: ${formatMetersForTest(scene.ranked[0].rmsMeters)} / 比べた相手 —`,
+    );
   });
 });
 

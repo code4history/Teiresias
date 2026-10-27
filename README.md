@@ -290,6 +290,11 @@ decision to persist or adopt is the responsibility of the Editor, not of the lib
 - **Not supported**: geodesic RMS through the inverse transformation, the antimeridian, polar regions,
   epoch / grid provenance, robust / weight / LOO / bootstrap, progress callbacks, and parallel candidate
   processing. They are tracked in [#5](https://github.com/code4history/Teiresias/issues/5).
+- **CRSs that differ only in their linear unit cannot be told apart by GCP fitting**: when two
+  CRSs share the same projection and differ only in unit (metre and US survey foot, for example), the
+  scale of the similarity transform absorbs the unit difference. Whichever one is selected, only the
+  numbers in the world file change. The difference between a historical grid and a nearby modern CRS
+  is a few centimetres even with exact GCPs (on a real map the GCP error is larger).
 - **No CLI**: Teiresias is a library only. There is no command-line interface.
 - **Distribution**: this package is not published to npm yet (`private: true`). `@c4h/daedalus` is
   resolved through the local sibling `link:../Daedalus`.
@@ -351,11 +356,16 @@ entry point; they do not lock the controls). The labels on screen are shown in J
 | `place` | 京都の GCP | 東京の GCP |
 | `y-direction` | y 上向き | y 下向き（走査した地図） |
 | `normalization` | 正規化あり | 正規化なし |
+| `historical-grid` | 現代の地図（VI 系で描いた） | 戦前の市街図（歴史グリッド B 帯で描いた） |
 
 Above the ranking the page shows a one-line flow (`Atlas` → `Daedalus` → `Teiresias` with the live
 counts and the winning CRS), the discrimination badge next to the candidate it was compared with, and
-the selected world file with the sign of `yScale` spelled out as y up / y down. The world-file panel
-itself lives in the Daedalus demo, so the selection links to it.
+the selected world file with the sign of `yScale` spelled out as y up / y down. The ranking table has
+a column for the unit of each candidate, and the selected world file names its unit next to the six
+values (a historical grid draws them in yards). The first-place `rmsMeters` and the `rmsMeters` of
+the candidate it was compared with for discrimination (the first candidate with a different
+definition from the first place) are shown side by side. The world-file panel itself lives in the
+Daedalus demo, so the selection links to it.
 
 Because proj-wasm loads a Worker and a WASM binary, **it does not work over `file://`** (serve it over HTTP).
 

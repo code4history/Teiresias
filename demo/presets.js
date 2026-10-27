@@ -34,6 +34,10 @@ const Y_DIRECTION_EXPECTATION =
 const NORMALIZATION_EXPECTATION =
   'A: 真値の組が上位で、識別力の札は「識別できている」。B: 真値が上位から落ち、識別力の札が「潰れている」になる（識別力は、同じ定義の候補をまとめて 1 つと数えたときの 1 位と 2 位の比）';
 
+/** 地図の元期（現代の地図と戦前の市街図）で推定と world file の単位が分かれる。A・B で同じ 1 行を使う。 */
+const HISTORICAL_GRID_EXPECTATION =
+  'A: 1 位は VI 系の同値の組。B: 1 位は歴史グリッド B 帯で、world file の値は yard。どちらも「変換できなかった候補」に歴史グリッドが並ばない。1 位と 2 位の差は数 cm で、合成した正確な GCP だから分かれる（実際の地図では GCP の誤差の方が大きい）';
+
 /** 対比の一覧。画面の帯とテストはこの順に使う。 */
 export const PRESETS = Object.freeze([
   {
@@ -56,6 +60,19 @@ export const PRESETS = Object.freeze([
       input: presetInput(scenes.kyoto.id, { yFlip: true, chirality: 'direct-only' }),
     },
     expect: Object.freeze({ a: NORMALIZATION_EXPECTATION, b: NORMALIZATION_EXPECTATION }),
+  },
+  {
+    // custom の定義（歴史グリッド）を含むカタログで、現代の地図と戦前の市街図を比べる。
+    id: 'historical-grid',
+    a: {
+      label: '現代の地図（VI 系で描いた）',
+      input: presetInput(scenes.kyoto.id, { candidateMode: 'catalog-custom', yFlip: true }),
+    },
+    b: {
+      label: '戦前の市街図（歴史グリッド B 帯で描いた）',
+      input: presetInput(scenes['kyoto-utjcp'].id, { candidateMode: 'catalog-custom', yFlip: true }),
+    },
+    expect: Object.freeze({ a: HISTORICAL_GRID_EXPECTATION, b: HISTORICAL_GRID_EXPECTATION }),
   },
 ]);
 

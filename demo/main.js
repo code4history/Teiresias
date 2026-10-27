@@ -235,6 +235,7 @@ export function initDemo(config = {}) {
     geoCanvas: doc.getElementById('geo-canvas'),
     pixelCanvas: doc.getElementById('pixel-canvas'),
     discrimination: doc.getElementById('discrimination'),
+    topRms: doc.getElementById('top-rms'),
     resultCount: doc.getElementById('result-count'),
     rankedBody: doc.getElementById('ranked-body'),
     selectedBody: doc.getElementById('selected-body'),
@@ -301,6 +302,8 @@ export function initDemo(config = {}) {
       appendCell(row, entry.score === null ? '—' : entry.score.toFixed(6));
       appendCell(row, formatMeters(entry.rmsMeters));
       appendCell(row, entry.isTruth ? '真値' : entry.isSameDefinition ? '同値' : '');
+      // その候補の座標の単位（metre でない候補は世界測地系と違う単位で world file が出る）。
+      appendCell(row, entry.unit?.name ?? '');
       el.rankedBody.appendChild(row);
     }
   }
@@ -332,6 +335,8 @@ export function initDemo(config = {}) {
       for (const key of ['xScale', 'ySkew', 'xSkew', 'yScale', 'xOrigin', 'yOrigin']) {
         appendDefinition(list, key, formatMeters(worldFile[key]));
       }
+      // 6 値はその候補の座標の単位で書かれている ∴ 単位を値の隣に出す。
+      appendDefinition(list, 'unit', scene.selected.unit.name);
       // `yScale` の符号は「画像の y がどちら向きか」である ∴ 数に加えて言葉でも出す。
       appendDefinition(
         list,
@@ -378,6 +383,22 @@ export function initDemo(config = {}) {
   }
 
   /**
+   * 1 位と**比べた相手**（1 位と定義が違う最初の候補）の `rmsMeters` を並べて出す。
+   *
+   * 相手は識別力の札と同じ `discrimination.against` を使う（同じ定義を 2 か所で実装しない）。
+   * 残差は metre で比べられる（単位が違う候補でも同じ土俵）。差が小さいことは隠さず、数で出す。
+   * 比べた相手が無い（`against` が null）ときは相手の側を「—」にする。
+   */
+  function topRmsLineOf(scene) {
+    if (!scene || scene.ranked.length === 0) return '';
+    const first = scene.ranked[0];
+    const { against, top2Rms } = scene.discrimination;
+    const opponent =
+      against === null || against === undefined ? '—' : `${against} rmsMeters: ${formatMeters(top2Rms)}`;
+    return `1 位 ${first.id} rmsMeters: ${formatMeters(first.rmsMeters)} / 比べた相手 ${opponent}`;
+  }
+
+  /**
    * 流れの表示の 1 行（Atlas → Daedalus → Teiresias）。件数は実行時の値である。
    * 推定が失敗したときは 1 位の代わりに理由と件数を出す。
    */
@@ -400,6 +421,7 @@ export function initDemo(config = {}) {
     renderRanked(scene);
     renderSelected(scene);
     renderDiscrimination(scene);
+    setText(el.topRms, topRmsLineOf(scene));
     setText(el.flow, scene ? flowLineOf(scene, state.candidates.length) : '');
     setText(
       el.resultCount,

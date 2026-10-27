@@ -40,13 +40,25 @@ function sceneOf({ id, label, extent, truthId, zones }) {
   });
 }
 
+/** 京都近郊の探索範囲。`kyoto` と `kyoto-utjcp` は同じ範囲を使う（値を二重に書かない）。 */
+const KYOTO_EXTENT = Object.freeze({ west: 135.6, south: 34.9, east: 135.9, north: 35.1 });
+
 /** 場面の ID → 場面。デモの入力（`demo/presets.js` の `input.scene`）はこの ID で指す。 */
 export const scenes = Object.freeze({
   kyoto: sceneOf({
     id: 'kyoto',
     label: '京都',
-    extent: { west: 135.6, south: 34.9, east: 135.9, north: 35.1 },
+    extent: KYOTO_EXTENT,
     truthId: 'EPSG:6674',
+    zones: ['EPSG:6673', 'EPSG:6674', 'EPSG:6675'],
+  }),
+  // 京都と同じ範囲・GCP で、真値だけを歴史グリッド（UTJCP の B 帯）にした場面。
+  // 範囲と GCP の値は `kyoto` と共有する。
+  'kyoto-utjcp': sceneOf({
+    id: 'kyoto-utjcp',
+    label: '京都（歴史グリッド）',
+    extent: KYOTO_EXTENT,
+    truthId: 'UTJCP:ZONE-B',
     zones: ['EPSG:6673', 'EPSG:6674', 'EPSG:6675'],
   }),
   tokyo: sceneOf({

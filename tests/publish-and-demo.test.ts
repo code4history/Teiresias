@@ -47,7 +47,7 @@ describe('publish and demo packaging', () => {
     expect(engineJs).toContain('import(\'@c4h/atlas\')');
     expect(engineJs).toContain('initializeProjWasmRuntime');
     expect(engineJs).toContain('listProjectedCrsFromProjWasm');
-    expect(engineJs).toContain('transformLonLatArrayToProjected');
+    expect(engineJs).toContain('transformLonLatToCandidate');
     // transformer はローカルに組まず、Atlas の公開 adapter で作る
     expect(engineJs).toContain('createCandidateTransformer');
     expect(engineJs).toContain('projWasmAssetBaseUrl');
@@ -111,6 +111,12 @@ describe('publish and demo packaging', () => {
     expect(style).not.toContain('c4h-');
     // デモ固有の見た目は接頭辞つきで置かれている（検査が vacuous でないことの確認）
     expect(style).toContain('.teiresias-');
+  });
+
+  it('shares one style rule between the flow line and the top rms line', async () => {
+    const style = await readText('demo', 'style.css');
+    // セレクタを並べて 1 つの規則を共有する（同じ宣言を 2 回書かない）。
+    expect(style).toMatch(/\.teiresias-flow\s*,\s*\.teiresias-top-rms\s*\{/);
   });
 
   it('never uses HTML string sinks in demo scripts (m3-t1/AC-7 / K20)', async () => {

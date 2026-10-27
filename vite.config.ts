@@ -15,7 +15,6 @@
  *   （Atlas の規約を踏襲。緩めない）。禁止語の literal を本ファイルへ書かないのは、
  *   `tests/publish-and-demo.test.ts` の否定 assert が**この注記自身を検出して常に RED に
  *   なる**のを避けるためである（needle の正本は同テストの表側にある）。
- * - `data/crs/custom-projections.json` は複製しない（本デモは custom projection を使わない）。
  */
 import { defineConfig } from "vite";
 import { existsSync, readFileSync } from "node:fs";

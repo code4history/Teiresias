@@ -149,6 +149,69 @@ describe('デモのプリセットの A と B で出力が分かれる（実 eng
     expect(Math.sign(yScaleB)).toBe(-Math.sign(yScaleA));
   });
 
+  it('historical-grid: A は VI 系の同値の組が上位、B は歴史グリッド B 帯が 1 位で yard 単位になる', async () => {
+    const optionA = optionOf('historical-grid', 'a');
+    const optionB = optionOf('historical-grid', 'b');
+
+    // 入力の値はプリセットが持つ（候補の集め方・場面）。テストへ書き写さない。
+    expect(optionA.input.candidateMode).toBe('catalog-custom');
+    expect(optionB.input.candidateMode).toBe('catalog-custom');
+    expect(optionA.input.yFlip).toBe(true);
+    expect(optionB.input.yFlip).toBe(true);
+    expect(optionA.input.chirality).toBe('normalize');
+    expect(optionB.input.chirality).toBe('normalize');
+    expect(optionA.scene.id).toBe('kyoto');
+    expect(optionB.scene.id).toBe('kyoto-utjcp');
+    expect(optionB.scene.truthId).toBe('UTJCP:ZONE-B');
+
+    const a = await runPresetOption(optionA);
+    const b = await runPresetOption(optionB);
+    const klassA = truthClassIds(optionA, a.candidates);
+    const klassB = truthClassIds(optionB, b.candidates);
+    // 識別力の比べた相手の行（1 位と定義が違う最初の候補）。
+    const opponentOf = (run: typeof a) =>
+      run.result.ranked.find((entry) => entry.id === run.result.discrimination.against);
+    const opponentA = opponentOf(a);
+    const opponentB = opponentOf(b);
+
+    console.info(
+      `[historical-grid] A: 候補 ${a.candidates.length} 件・真値の組 ${klassA.join(', ')}・先頭 ${topIds(
+        a.result.ranked,
+        Math.min(klassA.length, a.result.ranked.length),
+      ).join(', ')}` +
+        ` / B: 候補 ${b.candidates.length} 件・1 位 ${b.result.ranked[0]?.id}（rms ${b.result.ranked[0]?.rmsMeters}）` +
+        `・2 位 ${b.result.ranked[1]?.id}（rms ${b.result.ranked[1]?.rmsMeters}）` +
+        `・単位 ${b.result.selected?.unit.name}（${b.result.selected?.unit.metresPerUnit}）` +
+        ` / 変換不能 A: ${JSON.stringify(a.result.untransformableIds)} B: ${JSON.stringify(b.result.untransformableIds)}` +
+        ` / 識別力 A: 1 位 rms ${a.result.ranked[0]?.rmsMeters}・相手 ${a.result.discrimination.against}（rms ${opponentA?.rmsMeters}）` +
+        ` / B: 1 位 rms ${b.result.ranked[0]?.rmsMeters}・相手 ${b.result.discrimination.against}（rms ${opponentB?.rmsMeters}）`,
+    );
+
+    // A: 1 位から縮退クラスの件数までが、真値 EPSG:6674 の縮退クラスである
+    expect(klassA).toContain('EPSG:6674');
+    expect(klassA).not.toContain('UTJCP:ZONE-B');
+    expect(headIds(a.result.ranked, klassA.length)).toEqual(klassA);
+    expect(a.result.selected?.unit.name).toBe('metre');
+
+    // B: 1 位は歴史グリッドの B 帯で、world file の値は yard である
+    expect(b.result.ranked[0]?.id).toBe('UTJCP:ZONE-B');
+    expect(b.result.ranked[0]?.isTruth).toBe(true);
+    expect(b.result.selected?.unit.name).toBe('yard (Japan City Plans)');
+    expect(b.result.selected?.unit.metresPerUnit).toBe(0.9143985307444408);
+
+    // 識別力の比べた相手は 1 位の縮退クラスの外で、その rmsMeters は 1 位より大きい
+    expect(opponentA).toBeDefined();
+    expect(klassA).not.toContain(a.result.discrimination.against);
+    expect(opponentA?.rmsMeters as number).toBeGreaterThan(a.result.ranked[0]?.rmsMeters as number);
+    expect(opponentB).toBeDefined();
+    expect(klassB).not.toContain(b.result.discrimination.against);
+    expect(opponentB?.rmsMeters as number).toBeGreaterThan(b.result.ranked[0]?.rmsMeters as number);
+
+    // どちらも「変換できなかった候補」に歴史グリッドが並ばない
+    expect(a.result.untransformableIds.filter((id) => id.startsWith('UTJCP:'))).toEqual([]);
+    expect(b.result.untransformableIds.filter((id) => id.startsWith('UTJCP:'))).toEqual([]);
+  });
+
   it('normalization: 正規化ありは真値の組が上位で識別できており、なしは真値が落ちて潰れる', async () => {
     const a = await runPresetOption(optionOf('normalization', 'a'));
     const b = await runPresetOption(optionOf('normalization', 'b'));
