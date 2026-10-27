@@ -29,10 +29,12 @@ import {
 import { estimateCrs } from '../src/index.js';
 import type { CandidateCrs, EstimationResult } from '../src/index.js';
 
-// 実 engine の初回のカタログ読み込み（proj.db の展開）は、最初に呼んだテストが払う。
-// 全件を並列に走らせた負荷ありで最大 8,845 ms を測った（3 回）∴ その 2 倍を秒へ切り上げた
-// 18 秒をこのファイルの timeout にする（既定の 5 秒では負荷ありで落ちる）。
-vi.setConfig({ testTimeout: 18_000 });
+import { REAL_ENGINE_TEST_TIMEOUT_MS } from './fixtures/timeouts.js';
+
+// 実 engine の初回のカタログ読み込み（proj.db の展開）は、最初に呼んだテストが払う。既定の
+// 5 秒では負荷ありで落ちるので、実 engine を使うファイルに共通の timeout をファイル単位で付ける
+// （値と決め方は tests/fixtures/timeouts.ts）。
+vi.setConfig({ testTimeout: REAL_ENGINE_TEST_TIMEOUT_MS });
 
 // ---------------------------------------------------------------------------
 // 実カタログ（ハードコードした ProjectedCrsInfo は作らない。カタログ経路を E2E に含める）
@@ -344,6 +346,9 @@ describe('m2a-t1/AC-6: 実 engine を注入した estimateCrs（反射なしセ�
     });
 
     expect(result.untransformableIds).toEqual([]);
+    // Atlas の公開 adapter は通常の経路で実装側の失敗を出さない（出せば failed になる）
+    expect(result.failure).toBeNull();
+    expect(result.status).not.toBe('failed');
     expect(result.ranked).toHaveLength(3);
     expect(rankedIds(result)[0]).toBe(TRUE_ID);
 
@@ -746,6 +751,9 @@ describe('chirality 正規化（既定）: 実 engine・既定カタログ', () 
     const result = await estimateCrs(reflectedSet ? sets.reflected : sets.forward, candidates, {
       transformer: createCandidateTransformer(candidates),
     });
+    // 既定カタログでも Atlas の公開 adapter は実装側の失敗を出さない（反射あり／なし）
+    expect(result.failure).toBeNull();
+    expect(result.status).not.toBe('failed');
     return { result, klass: await truthClass(candidates) };
   }
 

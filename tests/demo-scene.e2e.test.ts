@@ -35,10 +35,12 @@ import {
   runScene,
 } from '../demo/estimate-scene.js';
 
-// 実 engine の初回のカタログ読み込み（proj.db の展開）は、最初に呼んだテストが払う。
-// 全件を並列に走らせた負荷ありで最大 8,845 ms を測った（3 回）∴ その 2 倍を秒へ切り上げた
-// 18 秒をこのファイルの timeout にする（既定の 5 秒では負荷ありで落ちる）。
-vi.setConfig({ testTimeout: 18_000 });
+import { REAL_ENGINE_TEST_TIMEOUT_MS } from './fixtures/timeouts.js';
+
+// 実 engine の初回のカタログ読み込み（proj.db の展開）は、最初に呼んだテストが払う。既定の
+// 5 秒では負荷ありで落ちるので、実 engine を使うファイルに共通の timeout をファイル単位で付ける
+// （値と決め方は tests/fixtures/timeouts.ts）。
+vi.setConfig({ testTimeout: REAL_ENGINE_TEST_TIMEOUT_MS });
 
 const geoPoints = GCP_LONLAT.map((point) => [point[0], point[1]] as [number, number]);
 
@@ -99,7 +101,7 @@ describe('m3-t1/AC-5: デモの現象を実 Atlas engine で固定する', () =>
     expect(result.ranked[0].id).toBe(TRUE_ID);
     expect(result.ranked[0].isTruth).toBe(true);
     expect(result.untransformableIds).toEqual([]);
-  }, 30_000);
+  });
 
   it('(b) 反射なしの rms[2位]/rms[1位] が 1e6 を超える（識別できている）', async () => {
     const result = await scene({ mode: 'zones', yFlip: false });
@@ -107,7 +109,7 @@ describe('m3-t1/AC-5: デモの現象を実 Atlas engine で固定する', () =>
     expect(ratio).not.toBeNull();
     expect(ratio as number).toBeGreaterThan(1e6);
     expect(collapsed).toBe(false);
-  }, 30_000);
+  });
 
   it('(c) 正規化なし（direct-only）: 反射ありで同じ比が 1.01 未満へ落ちる（識別力が潰れる）', async () => {
     const result = await scene({ mode: 'zones', yFlip: true, chirality: 'direct-only' });
@@ -115,7 +117,7 @@ describe('m3-t1/AC-5: デモの現象を実 Atlas engine で固定する', () =>
     expect(ratio).not.toBeNull();
     expect(ratio as number).toBeLessThan(COLLAPSE_THRESHOLD);
     expect(collapsed).toBe(true);
-  }, 30_000);
+  });
 
   it('(d) 正規化なし（direct-only）: 既定カタログ + 反射ありでは真値が先頭 3 件から外れる', async () => {
     const reflected = await scene({ mode: 'catalog', yFlip: true, chirality: 'direct-only' });
@@ -131,14 +133,14 @@ describe('m3-t1/AC-5: デモの現象を実 Atlas engine で固定する', () =>
     expect(reflected.ranked.some((entry) => entry.isTruth)).toBe(true);
     // 反射なしでは真値の縮退クラスが先頭 k 件を占める（対照）
     expect(headIds(forward.ranked, klass.length)).toEqual(klass);
-  }, 30_000);
+  });
 
   it("(c') 正規化あり（既定）: 反射ありでも真値が ranked[0] で識別できていて、yScale が負", async () => {
     const result = await scene({ mode: 'zones', yFlip: true });
     expect(result.ranked[0].id).toBe(TRUE_ID);
     expect(result.discrimination.collapsed).toBe(false);
     expect(result.selected?.worldFile.yScale as number).toBeLessThan(0);
-  }, 30_000);
+  });
 
   it("(d') 正規化あり（既定）: 既定カタログで y の向きによらず真値が先頭 3 件に入り、yScale の符号だけが分かれる", async () => {
     const reflected = await scene({ mode: 'catalog', yFlip: true });
@@ -150,7 +152,7 @@ describe('m3-t1/AC-5: デモの現象を実 Atlas engine で固定する', () =>
     expect(reflected.ranked.slice(0, klass.length).some((entry) => entry.isTruth)).toBe(true);
     expect(forward.selected?.worldFile.yScale as number).toBeGreaterThan(0);
     expect(reflected.selected?.worldFile.yScale as number).toBeLessThan(0);
-  }, 30_000);
+  });
 
   it('(e) GCP を 1 点だけ動かすと ranked の並びまたは rmsMeters が変わる', async () => {
     const base = await scene({ mode: 'zones', yFlip: false });
@@ -170,7 +172,7 @@ describe('m3-t1/AC-5: デモの現象を実 Atlas engine で固定する', () =>
     const orderChanged = JSON.stringify(baseOrder) !== JSON.stringify(movedOrder);
     const rmsChanged = JSON.stringify(baseRms) !== JSON.stringify(movedRms);
     expect(orderChanged || rmsChanged).toBe(true);
-  }, 30_000);
+  });
 });
 
 describe('m3-t1/AC-5: discriminationOf の境界（純関数側）', () => {
