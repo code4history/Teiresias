@@ -25,14 +25,37 @@
  * its check.
  */
 import { execFileSync, spawnSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
-const TIME_LIMIT_MS = 300_000;
+export const TIME_LIMIT_MS = 300_000;
 const packageRoot = resolve(dirname(fileURLToPath(import.meta.url)), '..');
 const siblingsRoot = resolve(packageRoot, '..');
+
+/** Milliseconds left before the whole run must stop. */
+export function remainingMs(startedAt, now = Date.now()) {
+  return TIME_LIMIT_MS - (now - startedAt);
+}
+
+/** The same outcome as the child's timeout: a reason, `ok: false` and exit code 1. */
+function timeLimitError() {
+  return new Error(`timed out after ${TIME_LIMIT_MS / 1000} s`);
+}
+
+/**
+ * Removes the temporary consumer directory only when the whole run succeeded. On failure the
+ * directory stays, so the tarballs and the installed tree can be inspected; its place is
+ * reported on stderr.
+ */
+export function cleanupConsumerDir(dir, ok) {
+  if (ok === true) {
+    rmSync(dir, { recursive: true, force: true });
+    return;
+  }
+  console.error(`consumer-smoke: keeping ${dir} after a failed run`);
+}
 
 const KYOTO = { west: 135.6, south: 34.9, east: 135.9, north: 35.1 };
 const DEFAULT_QUERY = { extent: KYOTO, area: 'Japan', onshoreOnly: true };
@@ -146,64 +169,77 @@ function parseArgs(argv) {
   return options;
 }
 
-function pnpm(args, cwd) {
-  // stdout carries only the final JSON line, so pnpm's own output goes to stderr.
-  execFileSync('pnpm', args, { cwd, stdio: ['ignore', process.stderr, 'inherit'] });
+export function pnpm(args, cwd, startedAt, run = execFileSync) {
+  const timeout = remainingMs(startedAt);
+  if (timeout <= 0) throw timeLimitError();
+  try {
+    // stdout carries only the final JSON line, so pnpm's own output goes to stderr.
+    run('pnpm', args, { cwd, stdio: ['ignore', process.stderr, 'inherit'], timeout });
+  } catch (error) {
+    // A pnpm call that ran out of the shared budget is the same outcome as a timed-out child.
+    if (error?.code === 'ETIMEDOUT') throw timeLimitError();
+    throw error;
+  }
 }
 
-function pack(repoDir, destination) {
+function pack(repoDir, destination, startedAt) {
   const before = new Set(existsSync(destination) ? readdirSync(destination) : []);
-  pnpm(['pack', '--pack-destination', destination], repoDir);
+  pnpm(['pack', '--pack-destination', destination], repoDir, startedAt);
   const created = readdirSync(destination).filter((name) => name.endsWith('.tgz') && !before.has(name));
   if (created.length !== 1) throw new Error(`packing ${repoDir} made ${created.length} tarballs`);
   return join(destination, created[0]);
 }
 
 /** Installs the three packages into a new empty directory and returns it. */
-function installConsumer(options) {
+function installConsumer(options, startedAt) {
   const dir = mkdtempSync(join(tmpdir(), 'teiresias-consumer-'));
-  const tarballs = join(dir, 'tarballs');
-  mkdirSync(tarballs);
-  const specs = {};
-  const fromTarball = {};
-  const take = (name, repoDir) => {
-    const file = `file:${pack(repoDir, tarballs)}`;
-    specs[name] = file;
-    fromTarball[name] = file;
-  };
-  if (options.mode === 'local') {
-    take('@c4h/atlas', join(siblingsRoot, 'Atlas'));
-    take('@c4h/daedalus', join(siblingsRoot, 'Daedalus'));
-    take('@c4h/teiresias', packageRoot);
-  } else if (options.mode === 'deps-from-registry') {
-    specs['@c4h/atlas'] = options.version;
-    specs['@c4h/daedalus'] = options.version;
-    take('@c4h/teiresias', packageRoot);
-  } else {
-    for (const name of ['@c4h/atlas', '@c4h/daedalus', '@c4h/teiresias']) specs[name] = options.version;
+  try {
+    const tarballs = join(dir, 'tarballs');
+    mkdirSync(tarballs);
+    const specs = {};
+    const fromTarball = {};
+    const take = (name, repoDir) => {
+      const file = `file:${pack(repoDir, tarballs, startedAt)}`;
+      specs[name] = file;
+      fromTarball[name] = file;
+    };
+    if (options.mode === 'local') {
+      take('@c4h/atlas', join(siblingsRoot, 'Atlas'));
+      take('@c4h/daedalus', join(siblingsRoot, 'Daedalus'));
+      take('@c4h/teiresias', packageRoot);
+    } else if (options.mode === 'deps-from-registry') {
+      specs['@c4h/atlas'] = options.version;
+      specs['@c4h/daedalus'] = options.version;
+      take('@c4h/teiresias', packageRoot);
+    } else {
+      for (const name of ['@c4h/atlas', '@c4h/daedalus', '@c4h/teiresias']) specs[name] = options.version;
+    }
+    writeFileSync(
+      join(dir, 'package.json'),
+      `${JSON.stringify({ name: 'teiresias-consumer-smoke', private: true, type: 'module', dependencies: specs }, null, 2)}\n`,
+    );
+    // overrides also point Teiresias' own dependency on @c4h/daedalus at the same tarball.
+    const workspace = [
+      ...(Object.keys(fromTarball).length > 0
+        ? ['overrides:', ...Object.entries(fromTarball).map(([name, file]) => `  "${name}": "${file}"`)]
+        : []),
+      'minimumReleaseAgeExclude:',
+      '  - "@maplat/*"',
+      '  - "@c4h/*"',
+      '',
+    ];
+    writeFileSync(join(dir, 'pnpm-workspace.yaml'), workspace.join('\n'));
+    // Re-exported from a file inside the consumer directory, so the imports resolve there.
+    writeFileSync(
+      join(dir, 'entry.mjs'),
+      "export * as atlas from '@c4h/atlas';\nexport * as teiresias from '@c4h/teiresias';\n",
+    );
+    pnpm(['install'], dir, startedAt);
+    return dir;
+  } catch (error) {
+    console.error(`consumer-smoke: keeping ${dir} after a failed install`);
+    throw error;
   }
-  writeFileSync(
-    join(dir, 'package.json'),
-    `${JSON.stringify({ name: 'teiresias-consumer-smoke', private: true, type: 'module', dependencies: specs }, null, 2)}\n`,
-  );
-  // overrides also point Teiresias' own dependency on @c4h/daedalus at the same tarball.
-  const workspace = [
-    ...(Object.keys(fromTarball).length > 0
-      ? ['overrides:', ...Object.entries(fromTarball).map(([name, file]) => `  "${name}": "${file}"`)]
-      : []),
-    'minimumReleaseAgeExclude:',
-    '  - "@maplat/*"',
-    '  - "@c4h/*"',
-    '',
-  ];
-  writeFileSync(join(dir, 'pnpm-workspace.yaml'), workspace.join('\n'));
-  // Re-exported from a file inside the consumer directory, so the imports resolve there.
-  writeFileSync(
-    join(dir, 'entry.mjs'),
-    "export * as atlas from '@c4h/atlas';\nexport * as teiresias from '@c4h/teiresias';\n",
-  );
-  pnpm(['install'], dir);
-  return dir;
 }
 
 const RESULT_MARKER = 'consumer-smoke-result ';
@@ -227,24 +263,31 @@ function main(startedAt) {
   if (options.scene !== null && !SCENES.some((scene) => scene.id === options.scene)) {
     throw new Error(`no scene named ${options.scene}`);
   }
-  const dir = installConsumer(options);
+  const dir = installConsumer(options, startedAt);
   console.error(`consumer-smoke: installed into ${dir}`);
   const args = [fileURLToPath(import.meta.url), '--run-in', dir, ...(options.scene === null ? [] : ['--scene', options.scene])];
-  const child = spawnSync(process.execPath, args, {
-    encoding: 'utf8',
-    stdio: ['ignore', 'pipe', 'inherit'],
-    timeout: Math.max(1, TIME_LIMIT_MS - (Date.now() - startedAt)),
-    maxBuffer: 1 << 26,
-  });
-  let outcome = null;
-  for (const line of (child.stdout ?? '').split('\n')) {
-    if (line.startsWith(RESULT_MARKER)) outcome = JSON.parse(line.slice(RESULT_MARKER.length));
-    else if (line !== '') process.stderr.write(`${line}\n`);
+  let outcome;
+  try {
+    const child = spawnSync(process.execPath, args, {
+      encoding: 'utf8',
+      stdio: ['ignore', 'pipe', 'inherit'],
+      timeout: Math.max(1, remainingMs(startedAt)),
+      maxBuffer: 1 << 26,
+    });
+    outcome = null;
+    for (const line of (child.stdout ?? '').split('\n')) {
+      if (line.startsWith(RESULT_MARKER)) outcome = JSON.parse(line.slice(RESULT_MARKER.length));
+      else if (line !== '') process.stderr.write(`${line}\n`);
+    }
+    if (outcome === null) {
+      const why = child.error?.code === 'ETIMEDOUT' ? `timed out after ${TIME_LIMIT_MS / 1000} s` : `the run gave no result (exit ${child.status})`;
+      outcome = { scenes: [], ok: false, reason: why };
+    }
+  } catch (error) {
+    console.error(`consumer-smoke: keeping ${dir} after a failed run`);
+    throw error;
   }
-  if (outcome === null) {
-    const why = child.error?.code === 'ETIMEDOUT' ? `timed out after ${TIME_LIMIT_MS / 1000} s` : `the run gave no result (exit ${child.status})`;
-    return { scenes: [], ok: false, reason: why };
-  }
+  cleanupConsumerDir(dir, outcome.ok === true);
   return outcome;
 }
 
