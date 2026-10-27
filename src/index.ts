@@ -9,8 +9,11 @@ export { estimateCrs } from './estimate-crs.js';
 
 export type {
   CandidateCrs,
+  CandidateFailure,
+  CandidateFailureKind,
   CandidateTransformer,
   EstimateOptions,
+  EstimationFailure,
   EstimationResult,
   FitStatus,
   FitWarning,

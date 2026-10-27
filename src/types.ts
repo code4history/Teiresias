@@ -6,7 +6,7 @@
  * re-export する（設計 K17。Daedalus `src/types.ts` に構造も意味も同じ型が実在するため、
  * 二重所有による将来 drift を避ける）。
  */
-import type { GeoBasis, MaybePromise, QualityGate, WorldFile, FitStatus, FitWarning } from '@c4h/daedalus';
+import type { GcpPair, GeoBasis, MaybePromise, QualityGate, WorldFile, FitStatus, FitWarning } from '@c4h/daedalus';
 
 export type {
   FitStatus,
@@ -70,6 +70,57 @@ export interface EstimateOptions {
    * 呼び出し回数は変わらない。`'direct-only'` は反転を試さない（正規化前の挙動）。
    */
   chirality?: 'normalize' | 'direct-only';
+  /**
+   * 検証用の GCP（Daedalus の holdout 検証へ渡す）。`geo` は `geoBasis` の順。
+   *
+   * 当てはめには使わず、affine を採るかどうかの検証にだけ使う。transformer の呼び出しは
+   * 増えない（GCP と holdout の地理座標をつないで 1 回で変換する）。空配列は未指定と同じ。
+   */
+  holdout?: readonly GcpPair[];
+  /**
+   * 候補 1 件の transformer の呼び出しの上限（ms）。既定 120000。`Infinity` で無効。
+   * 正の数でない値・非数は既定へ正規化する。
+   *
+   * 上限を越えたらその場で推定を止め、`status: 'failed'`（`failure.reason: 'timeout'`）を返す。
+   * Promise を返して待たせる transformer の上限であり、同期で処理を握り続ける transformer は
+   * 打ち切れない。
+   */
+  timeoutMs?: number;
+  /**
+   * 推定全体の中止。中止されたら `signal.reason`（無ければ `AbortError` の `DOMException`）で
+   * reject する。
+   */
+  signal?: AbortSignal;
+}
+
+/**
+ * 実装側の失敗の種類（業務的な変換不能〔`null`〕は含まない）。
+ *
+ * - `adapter-bug`: transformer が throw / reject した
+ * - `adapter-contract-failure`: 出力が契約に反する（長さ不一致・非有限・空入力に配列を返した など）
+ * - `dependency-contract-failure`: Daedalus の返却が公開契約と食い違う
+ * - `adapter-timeout`: transformer が `timeoutMs` の内に答えなかった
+ */
+export type CandidateFailureKind =
+  | 'adapter-bug'
+  | 'adapter-contract-failure'
+  | 'dependency-contract-failure'
+  | 'adapter-timeout';
+
+/** 失敗した候補 1 件。 */
+export interface CandidateFailure {
+  /** `${authority}:${code}` */
+  id: string;
+  kind: CandidateFailureKind;
+  /** 何が起きたか（throw のメッセージ・`expected 5 points, got 4` など。500 文字で切る）。 */
+  message: string;
+}
+
+/** `status: 'failed'` の理由。 */
+export interface EstimationFailure {
+  reason: 'implementation-failure' | 'timeout';
+  /** 入力順。`timeout` のときは打ち切った 1 件が最後に来る。 */
+  candidates: CandidateFailure[];
 }
 
 /**
@@ -100,4 +151,12 @@ export interface EstimationResult {
   }>;
   warnings: readonly FitWarning[];
   untransformableIds: string[];
+  /**
+   * `status === 'failed'` の理由。それ以外は `null`。
+   *
+   * 実装側の失敗（`CandidateFailureKind`）が 1 件でもあれば、残りの候補が使えても `failed` に
+   * なり `selected` は `null` になる（その候補が真値だったかを判断できないため）。このとき
+   * `ranked` は評価できた候補だけの不完全な順位であり、選択に使ってはならない。
+   */
+  failure: EstimationFailure | null;
 }
