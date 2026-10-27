@@ -333,8 +333,8 @@ pnpm run preview
 件数・1 位の CRS を実行時の値で出す）、識別力の札の横には「比べた相手」、選択結果には world file の
 6 値と `yScale` の符号を言葉にした「y 上向き／y 下向き」を出す。順位の表には候補ごとの単位の
 列があり、選択結果では world file の 6 値の隣にその単位の名前を出す（歴史グリッドなら yard）。
-1 位と 2 位の `rmsMeters` も並べて出す。world file の当てはめのパネルは Daedalus のデモにあるので、
-選択結果からそこへリンクする。
+1 位の `rmsMeters` と、識別力で比べた相手（1 位と定義が違う最初の候補）の `rmsMeters` も
+並べて出す。world file の当てはめのパネルは Daedalus のデモにあるので、選択結果からそこへリンクする。
 
 proj-wasm は Worker と WASM を読むため、**`file://` では動かない**（HTTP で配信すること）。
 

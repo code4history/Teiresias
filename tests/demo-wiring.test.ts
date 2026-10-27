@@ -1093,17 +1093,57 @@ describe('歴史グリッドの対比（historical-grid）の結線', () => {
     expect(document.querySelectorAll('#ranked-body tr').length).toBe(scene.ranked.length);
     expect(document.querySelectorAll('#ranked-body tr').length).toBe(7);
   });
+});
 
-  it('1 位と 2 位の rmsMeters が並んで出る（先頭は厳密適合で、2 位はそれより大きい）', async () => {
-    const { demo } = await bootAndPress('historical-grid', 'b');
+describe('1 位と比べた相手の rmsMeters の行', () => {
+  beforeEach(() => {
+    mountPage();
+  });
+
+  it('1 位と同じ定義の候補が 2 位に来ても、行には定義の違う最初の候補を出す', async () => {
+    // 既定の場面（京都）では、真値 EPSG:6674 と同じ proj4 を持つ EPSG:2448 が 2 位に来る。
+    // 行に出す相手はその同値の候補ではなく、定義の違う最初の候補 EPSG:6673 である。
+    const demo = initDemo({ engine: makeStubEngine() });
+    await demo.whenSettled();
     const scene = demo.getState().scene;
 
-    expect(scene.ranked[0].rmsMeters).toBeLessThan(1e-9);
-    expect(scene.ranked[1].rmsMeters).toBeGreaterThan(scene.ranked[0].rmsMeters);
+    // 前提: 1 位と同じ定義の候補が実際に 2 位に来ている
+    expect(scene.ranked[0].isTruth).toBe(true);
+    expect(scene.ranked[1].isSameDefinition).toBe(true);
+    expect(scene.ranked[1].id).toBe(SAME_DEFINITION_ID);
+    // 相手は同値の候補ではなく、定義の違う最初の候補である
+    expect(scene.discrimination.against).toBe('EPSG:6673');
+
+    const opponent = scene.ranked.find((entry) => entry.id === 'EPSG:6673');
+    expect(opponent).toBeDefined();
+    // 2 つの rms の値は違う数として出る
+    expect(formatMetersForTest(opponent!.rmsMeters)).not.toBe(
+      formatMetersForTest(scene.ranked[0].rmsMeters),
+    );
+
     expect(document.getElementById('top-rms')?.textContent).toBe(
-      `1 位 rmsMeters: ${formatMetersForTest(scene.ranked[0].rmsMeters)} / 2 位 rmsMeters: ${formatMetersForTest(
-        scene.ranked[1].rmsMeters,
-      )}`,
+      `1 位 ${scene.ranked[0].id} rmsMeters: ${formatMetersForTest(
+        scene.ranked[0].rmsMeters,
+      )} / 比べた相手 EPSG:6673 rmsMeters: ${formatMetersForTest(opponent!.rmsMeters)}`,
+    );
+  });
+
+  it('比べた相手が無いときは、相手の側に — を出す', async () => {
+    const base = makeStubEngine();
+    const onlyTruth = [STUB_CANDIDATES[0]];
+    const engine = {
+      loadEngine: base.loadEngine,
+      loadCandidates: vi.fn(async () => onlyTruth),
+      makeTransformer: base.makeTransformer,
+      projectTruth: base.projectTruth,
+    };
+    const demo = initDemo({ engine });
+    await demo.whenSettled();
+
+    const scene = demo.getState().scene;
+    expect(scene.discrimination.against).toBeNull();
+    expect(document.getElementById('top-rms')?.textContent).toBe(
+      `1 位 ${scene.ranked[0].id} rmsMeters: ${formatMetersForTest(scene.ranked[0].rmsMeters)} / 比べた相手 —`,
     );
   });
 });

@@ -169,8 +169,9 @@
   color: #1a2744;
 }
 
-/* 流れの表示: Atlas → Daedalus → Teiresias を 1 行で。 */
-.teiresias-flow {
+/* 流れの表示（Atlas → Daedalus → Teiresias）と 1 位・比べた相手の行を同じ見た目にする。 */
+.teiresias-flow,
+.teiresias-top-rms {
   margin: 8px 0;
   font-size: 13px;
   color: #1a2744;

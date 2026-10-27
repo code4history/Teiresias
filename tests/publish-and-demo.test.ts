@@ -113,6 +113,12 @@ describe('publish and demo packaging', () => {
     expect(style).toContain('.teiresias-');
   });
 
+  it('shares one style rule between the flow line and the top rms line', async () => {
+    const style = await readText('demo', 'style.css');
+    // セレクタを並べて 1 つの規則を共有する（同じ宣言を 2 回書かない）。
+    expect(style).toMatch(/\.teiresias-flow\s*,\s*\.teiresias-top-rms\s*\{/);
+  });
+
   it('never uses HTML string sinks in demo scripts (m3-t1/AC-7 / K20)', async () => {
     // outer の sink 走査（scripts/m1-t4/verify-html-sinks.mjs）は Teiresias を含まず、
     // 走査サブディレクトリにも demo が無い ∴ **二重に届かない**。走査で守れない分を

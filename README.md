@@ -362,8 +362,10 @@ Above the ranking the page shows a one-line flow (`Atlas` → `Daedalus` → `Te
 counts and the winning CRS), the discrimination badge next to the candidate it was compared with, and
 the selected world file with the sign of `yScale` spelled out as y up / y down. The ranking table has
 a column for the unit of each candidate, and the selected world file names its unit next to the six
-values (a historical grid draws them in yards). The first and second `rmsMeters` are shown side by
-side. The world-file panel itself lives in the Daedalus demo, so the selection links to it.
+values (a historical grid draws them in yards). The first-place `rmsMeters` and the `rmsMeters` of
+the candidate it was compared with for discrimination (the first candidate with a different
+definition from the first place) are shown side by side. The world-file panel itself lives in the
+Daedalus demo, so the selection links to it.
 
 Because proj-wasm loads a Worker and a WASM binary, **it does not work over `file://`** (serve it over HTTP).
 

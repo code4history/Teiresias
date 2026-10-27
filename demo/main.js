@@ -383,18 +383,19 @@ export function initDemo(config = {}) {
   }
 
   /**
-   * 1 位と 2 位の `rmsMeters` を並べて出す。
+   * 1 位と**比べた相手**（1 位と定義が違う最初の候補）の `rmsMeters` を並べて出す。
    *
-   * 残差は metre で比べられる（単位が違う候補でも同じ土俵）。1 位と 2 位の差が小さいことは
-   * 隠さず、数で出す。
+   * 相手は識別力の札と同じ `discrimination.against` を使う（同じ定義を 2 か所で実装しない）。
+   * 残差は metre で比べられる（単位が違う候補でも同じ土俵）。差が小さいことは隠さず、数で出す。
+   * 比べた相手が無い（`against` が null）ときは相手の側を「—」にする。
    */
   function topRmsLineOf(scene) {
     if (!scene || scene.ranked.length === 0) return '';
     const first = scene.ranked[0];
-    const second = scene.ranked[1];
-    return `1 位 rmsMeters: ${formatMeters(first.rmsMeters)} / 2 位 rmsMeters: ${
-      second ? formatMeters(second.rmsMeters) : '—'
-    }`;
+    const { against, top2Rms } = scene.discrimination;
+    const opponent =
+      against === null || against === undefined ? '—' : `${against} rmsMeters: ${formatMeters(top2Rms)}`;
+    return `1 位 ${first.id} rmsMeters: ${formatMeters(first.rmsMeters)} / 比べた相手 ${opponent}`;
   }
 
   /**
