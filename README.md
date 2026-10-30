@@ -358,6 +358,10 @@ entry point; they do not lock the controls). The labels on screen are shown in J
 | `normalization` | 正規化あり | 正規化なし |
 | `historical-grid` | 現代の地図（VI 系で描いた） | 戦前の市街図（歴史グリッド B 帯で描いた） |
 
+The two `historical-grid` buttons collect candidates with `catalog-custom`: the whole default catalog
+with the onshore-only filter removed, so it also includes modern CRSs that cover the sea (such as
+UTM), plus the historical grids. That is why the ranking table shows more than just historical grids.
+
 Above the ranking the page shows a one-line flow (`Atlas` → `Daedalus` → `Teiresias` with the live
 counts and the winning CRS), the discrimination badge next to the candidate it was compared with, and
 the selected world file with the sign of `yScale` spelled out as y up / y down. The ranking table has
