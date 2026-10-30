@@ -1077,6 +1077,19 @@ describe('歴史グリッドの対比（historical-grid）の結線', () => {
     expect(badgeAgainst).toBe(expectedAgainst!.id);
   });
 
+  it('A を押すと選択結果の単位が metre で、画面にも metre だけが出る（yard は出ない）', async () => {
+    const { demo } = await bootAndPress('historical-grid', 'a');
+    const scene = demo.getState().scene;
+
+    expect(scene.ranked[0].id).toBe(scenes.kyoto.truthId);
+    expect(definitionOf('unit')).toBe('metre');
+    const selectedText = document.getElementById('selected-body')?.textContent ?? '';
+    expect(selectedText).toContain('metre');
+    expect(selectedText).not.toContain('yard');
+    // 順位の表の 1 位の行の単位の列も metre。
+    expect(cellOf(scenes.kyoto.truthId, columnIndexOf('単位'))).toBe('metre');
+  });
+
   it('A を押すと京都の場面と catalog-custom が engine へ渡り、流れは候補 9 → 変換 8 → 当てはめ 7 になる', async () => {
     const { engine, demo } = await bootAndPress('historical-grid', 'a');
 
