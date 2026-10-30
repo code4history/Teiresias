@@ -122,6 +122,15 @@ const SAME_DEFINITION_ID = 'EPSG:2448';
 /** 識別力で比べる相手（1 位と同じ定義の候補を飛ばした最初の行）。 */
 const DISCRIMINATION_AGAINST_ID = 'EPSG:6673';
 
+/**
+ * 画面の「見え方」の 1 行（historical-grid の A・B 共通）。
+ *
+ * 画面に出すべき見え方を、テストの中に文字列リテラルとして持つ（実装の定数を import しない
+ * ∴ 実装の文を書き換えてもテストが追随して緑のまま、ということが起きない）。
+ */
+const HISTORICAL_GRID_EXPECTATION_TEXT =
+  'A: 1 位は VI 系の同値の組。B: 1 位は歴史グリッド B 帯で、world file の値は yard。どちらも「変換できなかった候補」に歴史グリッドが並ばない。1 位と、画面が「比べた相手」に出す候補（1 位と同値の組を除いた最も近い候補。A では表の 2 位でないことがある）との差は数 cm で、合成した正確な GCP だから分かれる（実際の地図では GCP の誤差の方が大きい）';
+
 const UNTRANSFORMABLE_IDS = new Set([UNTRANSFORMABLE_ID]);
 const UNFITTABLE_IDS = new Set([UNFITTABLE_ID]);
 
@@ -1024,6 +1033,48 @@ describe('歴史グリッドの対比（historical-grid）の結線', () => {
     expect(document.querySelector('button[data-preset="historical-grid:b"]')?.textContent).toBe(
       '戦前の市街図（歴史グリッド B 帯で描いた）',
     );
+  });
+
+  for (const optionId of PRESET_OPTION_IDS) {
+    it(`historical-grid:${optionId} を押すと、「見え方」の 1 行が画面に出すべき文面と一致する`, async () => {
+      const demo = initDemo({ engine: makeStubEngine() });
+      await demo.whenSettled();
+
+      const button = document.querySelector(
+        `button[data-preset="historical-grid:${optionId}"]`,
+      ) as HTMLButtonElement;
+      expect(button).not.toBeNull();
+      button.dispatchEvent(new Event('click'));
+      await demo.whenSettled();
+
+      expect(expectationText()).toBe(HISTORICAL_GRID_EXPECTATION_TEXT);
+    });
+  }
+
+  it('A の識別力の札と rms の行が同じ「比べた相手」を指し、それは 1 位と同じ定義の候補ではない', async () => {
+    const { demo } = await bootAndPress('historical-grid', 'a');
+    const scene = demo.getState().scene;
+    const first = scene.ranked[0];
+
+    // 1 位は場面の真値（EPSG:6674）∴ 「同じ定義」は「1 位と同じ定義」と同義になる。
+    expect(first.id).toBe(scenes.kyoto.truthId);
+
+    // stub の順位から、1 位と定義の違う最初の候補を求める。
+    const expectedAgainst = scene.ranked.find(
+      (entry) => entry.rank > 1 && entry.isSameDefinition !== true,
+    );
+    expect(expectedAgainst).toBeDefined();
+    expect(expectedAgainst!.isSameDefinition).toBe(false);
+    expect(scene.discrimination.against).toBe(expectedAgainst!.id);
+
+    // 画面の札の「比べた相手: X」と、rms の行の「比べた相手 Y …」が同じ候補を指す。
+    const badgeAgainst = /比べた相手: (\S+)/.exec(discriminationText())?.[1];
+    const rowAgainst = /比べた相手 (\S+) rmsMeters:/.exec(
+      document.getElementById('top-rms')?.textContent ?? '',
+    )?.[1];
+    expect(badgeAgainst).toBeDefined();
+    expect(rowAgainst).toBe(badgeAgainst);
+    expect(badgeAgainst).toBe(expectedAgainst!.id);
   });
 
   it('A を押すと京都の場面と catalog-custom が engine へ渡り、流れは候補 9 → 変換 8 → 当てはめ 7 になる', async () => {

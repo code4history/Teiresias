@@ -36,7 +36,7 @@ const NORMALIZATION_EXPECTATION =
 
 /** 地図の元期（現代の地図と戦前の市街図）で推定と world file の単位が分かれる。A・B で同じ 1 行を使う。 */
 const HISTORICAL_GRID_EXPECTATION =
-  'A: 1 位は VI 系の同値の組。B: 1 位は歴史グリッド B 帯で、world file の値は yard。どちらも「変換できなかった候補」に歴史グリッドが並ばない。1 位と 2 位の差は数 cm で、合成した正確な GCP だから分かれる（実際の地図では GCP の誤差の方が大きい）';
+  'A: 1 位は VI 系の同値の組。B: 1 位は歴史グリッド B 帯で、world file の値は yard。どちらも「変換できなかった候補」に歴史グリッドが並ばない。1 位と、画面が「比べた相手」に出す候補（1 位と同値の組を除いた最も近い候補。A では表の 2 位でないことがある）との差は数 cm で、合成した正確な GCP だから分かれる（実際の地図では GCP の誤差の方が大きい）';
 
 /** 対比の一覧。画面の帯とテストはこの順に使う。 */
 export const PRESETS = Object.freeze([
