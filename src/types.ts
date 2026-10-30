@@ -53,12 +53,14 @@ export interface CandidatePoints {
 }
 
 /**
- * 候補 CRS への変換 adapter。契約は次のとおりである。
+ * 候補 CRS への変換 adapter。契約の全項目は README の
+ * “The contract of `CandidateTransformer`” の表にある。次は要約である。
  *
  * - 入力 `points` は `geoBasis` が示す順序の geo 点列（同順）。
  * - 出力は入力と同順同数の projected `[easting, northing]` 点列、`{ points, unit }`、または `null`。
  * - plain な点列は metre と解釈する。`CandidatePoints` は `unit` の単位の点列である。
  * - 空入力・業務的変換不能はすべて `null`。throw は adapter bug のときのみ。
+ * - 一点でも非有限なら全体を `null`（部分成功を返さない）。
  * - 同期返却（`MaybePromise` の T 側）と Promise 返却の双方が適合する。
  */
 export type CandidateTransformer = (
