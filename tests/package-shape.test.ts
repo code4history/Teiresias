@@ -113,7 +113,7 @@ function readOverrides(yaml: string): Record<string, string> {
   const overrides: Record<string, string> = {};
   let inBlock = false;
   for (const line of yaml.split('\n')) {
-    if (/^overrides:\s*$/.test(line)) {
+    if (/^overrides:\s*(#.*)?$/.test(line)) {
       inBlock = true;
       continue;
     }
@@ -276,6 +276,11 @@ describe('overrides の読み取り', () => {
     const overrides = readOverrides('overrides:\n  "@c4h/daedalus": link:../Wrong\n');
     expect(overrides['@c4h/daedalus']).toBe('link:../Wrong');
     expect(overrides['@c4h/daedalus']).not.toBe('link:../Daedalus');
+  });
+
+  it('見出しの行末コメント（overrides: # siblings）でも中身を読む', () => {
+    const overrides = readOverrides('overrides: # siblings\n  "@c4h/daedalus": link:../Wrong\n');
+    expect(overrides['@c4h/daedalus']).toBe('link:../Wrong');
   });
 
   it('コメントでも空行でもない読めない行があれば throw する', () => {

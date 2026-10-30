@@ -20,11 +20,12 @@ const packageRoot = fileURLToPath(new URL("..", import.meta.url));
  * wide.
  */
 const INTERNAL_REFERENCE =
-  /docs\/superpowers|\bm[0-9]+[ab]?-t[0-9]+|\bCycle ?[0-9]|post-cycle|仮仕様|AC-m[0-9]|HR-m[0-9]|SR-m[0-9]|maplat-v4-crs-libs|provisional specification|§[0-9]|\b(?:dec|nov|oct)2[0-9]|\b[A-Z]-[0-9]+\b|\bDM-[A-Z]?[0-9]|\bK[0-9]+\b|設計|rule-00|那由多|INF-[0-9]|\bAC-?[0-9]/;
+  /docs\/superpowers|\bPR-T[0-9]+[A-Za-z]?|\btrain\/[0-9]{4}-[0-9]{2}|\b(?:MAJ|MIN)-[0-9]+|\b(?:Minor|Info)-[0-9]+|トレイン|照合表|第\s*[0-9]+\s*便|サイクル\s*[0-9]+|NayutaProducts|\bDSH\b|\bm[0-9]+[ab]?-t[0-9]+|\bCycle ?[0-9]|post-cycle|仮仕様|AC-m[0-9]|HR-m[0-9]|SR-m[0-9]|maplat-v4-crs-libs|provisional specification|(?<!\b(?:RFC|ISO|OGC)\s?[0-9]{1,5}\s*)§[0-9]|\b(?:dec|nov|oct)2[0-9]|\b[A-Z]-[0-9]+\b|\bDM-[A-Z]?[0-9]|\bK[0-9]+\b|設計書|rule-00|那由多|INF-[0-9]|\bAC-?[0-9]/;
 
 /**
  * Lines the expression must flag. The labels are made up (they follow the shapes of the
- * real ones without naming any), so this file does not carry internal references itself.
+ * real ones without naming any). The expression and the samples live only in this file;
+ * tests/ is not part of the published tarball.
  */
 const MUST_MATCH = [
   "dec29",
@@ -35,6 +36,18 @@ const MUST_MATCH = [
   "m9-t9",
   "§9.9",
   "K99",
+  "PR-T9z",
+  "train/2099-01",
+  "MAJ-9",
+  "MIN-9",
+  "Minor-9",
+  "Info-9",
+  "トレイン",
+  "照合表",
+  "第 9 便",
+  "サイクル 9",
+  "NayutaProducts",
+  "DSH",
   "// dec29 probe",
   "// see 設計書 D-9 probe",
   "// T-99 probe",
@@ -54,6 +67,10 @@ const MUST_NOT_MATCH = [
   "x-skew",
   "failure.reason: 'timeout'",
   "ok_with_warnings",
+  "RFC 7946 §3.1",
+  "ISO 19111 §7.2",
+  "設計上の理由で",
+  "設計された",
 ];
 
 function walk(path: string): string[] {

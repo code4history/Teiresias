@@ -551,7 +551,7 @@ export async function estimateCrs(
 
   // 非空 L_geo gate。候補共通の score 分母が成立しない時点で候補 loop を開始しない。
   // 未呼出しの候補を「変換不能」と記録してはならない ∴ untransformableIds も空で返す。
-  // 空入力だけは空入力に null を返す契約の機械検証のため候補ごとに transformer を呼ぶ（下の loop へ進む）。
+  // 空入力のときだけは契約 (4)（空入力は null）の機械検証のため候補ごとに transformer を呼ぶ（下の loop へ進む）。
   const observationScale = computeObservationScale(gcps, sourceBasis);
   if (!isEmptyInput && (!Number.isFinite(observationScale) || observationScale < epsilonMeters)) {
     return { ...EMPTY_RESULT_SHAPE, ranked: [], warnings: [], untransformableIds: [] };
