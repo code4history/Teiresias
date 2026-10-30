@@ -131,6 +131,22 @@ const DISCRIMINATION_AGAINST_ID = 'EPSG:6673';
 const HISTORICAL_GRID_EXPECTATION_TEXT =
   'A: 1 位は VI 系の同値の組。B: 1 位は歴史グリッド B 帯で、world file の値は yard。どちらも「変換できなかった候補」に歴史グリッドが並ばない。1 位と、画面が「比べた相手」に出す候補（1 位と同値の組を除いた最も近い候補。A では表の 2 位でないことがある）との差は数 cm で、合成した正確な GCP だから分かれる（実際の地図では GCP の誤差の方が大きい）';
 
+/**
+ * プリセット ID → 画面の「見え方」の 1 行。
+ *
+ * 画面に出すべき見え方を、テストの中に文字列リテラルで持つ（`demo/presets.js` の値を
+ * import して比べると、実装の文を書き換えてもテストが緑のままになる）。
+ * 4 つのプリセットをすべて並べ、表のキーと `PRESETS` の ID の集合が一致することも別に確かめる。
+ */
+const EXPECTATION_BY_PRESET: Readonly<Record<string, string>> = Object.freeze({
+  place: 'A: 1 位は平面直角座標系 VI 系（とその同値の組）。B: 1 位は IX 系。候補の件数も変わる',
+  'y-direction':
+    'どちらも VI 系とその同値の組（EPSG:2448・EPSG:6674・ESRI:112206）が上位。yScale の符号だけが分かれる（A は上向き、B は下向き）',
+  normalization:
+    'A: 真値の組が上位で、識別力の札は「識別できている」。B: 真値が上位から落ち、識別力の札が「潰れている」になる（識別力は、同じ定義の候補をまとめて 1 つと数えたときの 1 位と 2 位の比）',
+  'historical-grid': HISTORICAL_GRID_EXPECTATION_TEXT,
+});
+
 const UNTRANSFORMABLE_IDS = new Set([UNTRANSFORMABLE_ID]);
 const UNFITTABLE_IDS = new Set([UNFITTABLE_ID]);
 
@@ -717,6 +733,17 @@ describe('プリセットの帯（ボタン → 入力・計算 1 回・見え�
     expect(expectationText()).toBe('');
   });
 
+  it('画面に出すべき見え方の文面の表が、プリセットの ID と過不足なく一致する', () => {
+    const presetIds = PRESETS.map((preset) => preset.id).sort();
+    const tableIds = Object.keys(EXPECTATION_BY_PRESET).sort();
+    expect(tableIds).toEqual(presetIds);
+    // 表の値は空でない文字列（未登録のプリセットを空文字でごまかさない）。
+    for (const text of Object.values(EXPECTATION_BY_PRESET)) {
+      expect(typeof text).toBe('string');
+      expect(text.length).toBeGreaterThan(0);
+    }
+  });
+
   for (const preset of PRESETS) {
     for (const optionId of PRESET_OPTION_IDS) {
       it(`${preset.id}:${optionId} を押すと定義どおりの入力が入り、計算が 1 回だけ走る`, async () => {
@@ -755,8 +782,8 @@ describe('プリセットの帯（ボタン → 入力・計算 1 回・見え�
         // 押したボタンだけが押された状態になる
         expect(pressedPresets()).toEqual([`${preset.id}:${optionId}`]);
 
-        // 見え方の 1 行はプリセットの文と一致する
-        expect(expectationText()).toBe(option.expectation);
+        // 見え方の 1 行は、画面に出すべき文面の表と一致する
+        expect(expectationText()).toBe(EXPECTATION_BY_PRESET[preset.id]);
 
         // 流れの表示の 3 つの件数が stub の定義どおりで、1 位が出る
         const scene = demo.getState().scene;
@@ -944,7 +971,7 @@ describe('手で操作したら中立に戻る（プリセットの印と見え�
     button.dispatchEvent(new Event('click'));
     await demo.whenSettled();
     expect(pressedPresets()).toEqual([`${presetId}:${optionId}`]);
-    expect(expectationText()).toBe(findPreset(presetId, optionId)!.expectation);
+    expect(expectationText()).toBe(EXPECTATION_BY_PRESET[presetId]);
     return { engine, demo };
   }
 
