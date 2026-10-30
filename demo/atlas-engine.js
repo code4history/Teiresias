@@ -73,8 +73,9 @@ export function loadEngine() {
  *               （`bboxPaddingDeg: 0.7`。E2E の `catalogWide()` と同一設定）。
  * - `catalog` … padding を指定しない**既定カタログ全件**（実運用どおりの呼び出し）。
  *               縮退クラス `EPSG:2448 = EPSG:6674 = ESRI:112206` を含む。
- * - `catalog-custom` … 既定カタログ全件に custom の定義（歴史グリッド）を足す。
- *               custom の帯は陸上だけの絞り込みでは候補に残らないため `onshoreOnly: false` で引く。
+ * - `catalog-custom` … 陸上だけの絞り込みを外した既定カタログ全件（海域を含む現代の CRS も入る）に、
+ *               custom の定義（歴史グリッド）を足す。custom の帯は陸上だけの絞り込みでは候補に
+ *               残らないため `onshoreOnly: false` で引く。
  */
 export async function loadCandidates(mode, scene = DEFAULT_SCENE) {
   const { listProjectedCrsFromProjWasm } = await loadAtlasRuntime();

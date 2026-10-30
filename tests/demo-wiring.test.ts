@@ -323,7 +323,8 @@ function stubCandidatesFor(mode: string, scene: { id?: string } | undefined): St
         : [...STUB_CANDIDATES];
   if (mode === 'zones') return base;
   if (mode === 'catalog') return [...base, EXTRA_CANDIDATE];
-  // catalog-custom: 既定カタログ全件 + custom の 3 帯（真値の帯を二重に足さない）。
+  // catalog-custom: 陸上だけの絞り込みを外した既定カタログ全件（海域を含む現代の CRS も入る）に、
+  // custom の定義（歴史グリッドの 3 帯）を足す（真値の帯を二重に足さない）。
   const historicalExtras = [HISTORICAL_ROW_A, HISTORICAL_ROW_B, HISTORICAL_ROW_C].filter(
     (row) => !base.some((entry) => entry.id === row.id),
   );
@@ -1235,6 +1236,23 @@ describe('1 位と比べた相手の rmsMeters の行', () => {
     expect(scene.discrimination.against).toBeNull();
     expect(document.getElementById('top-rms')?.textContent).toBe(
       `1 位 ${scene.ranked[0].id} rmsMeters: ${formatMetersForTest(scene.ranked[0].rmsMeters)} / 比べた相手 —`,
+    );
+  });
+});
+
+describe('候補の集め方の選択肢の文言', () => {
+  beforeEach(() => {
+    mountPage();
+  });
+
+  it('catalog-custom の選択肢が、海域を含む既定カタログ全件に歴史グリッドを足すことを言う', () => {
+    const options = Array.from(
+      document.querySelectorAll('#candidate-mode option'),
+    ) as HTMLOptionElement[];
+    const custom = options.find((option) => option.value === 'catalog-custom');
+    expect(custom).toBeDefined();
+    expect(custom?.textContent).toBe(
+      'catalog-custom（海域を含む既定カタログ全件 + 歴史グリッド）',
     );
   });
 });
