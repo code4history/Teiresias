@@ -149,7 +149,7 @@ describe('AC-m1-2: 2 候補 E2E（Teiresias 所有 GCP セット）', () => {
   });
 });
 
-describe('実測固定: fixture の recommendedE2eGcps（反射あり）に対する挙動', () => {
+describe('実測固定・正規化なし（direct-only）: fixture の recommendedE2eGcps（反射あり）に対する挙動', () => {
   /**
    * 【発見事項の可視化】
    * fixture の `recommendedE2eGcps` は pixel -> geo が**反射**（`lat = 35 - v*0.0078125`）を
@@ -162,12 +162,17 @@ describe('実測固定: fixture の recommendedE2eGcps（反射あり）に対�
    * 本 describe は、その実測挙動をそのまま固定して**発見を可視化**するためのものであり、
    * 期待する仕様を表明するものではない。設計 §7.2 の AC-m1-2 は
    * `tests/fixtures/mockTransformer.ts` の `teiresiasE2eGcps`（反射なし）で満たしている。
+   *
+   * `estimateCrs` は既定で反射を吸収する（chirality 正規化）ため、ここでは
+   * `chirality: 'direct-only'` を渡して正規化しない経路の挙動を固定する。正規化ありの
+   * 期待は下の「chirality 正規化（既定）」の describe にある。
    */
   const recommended: ReadonlyArray<GcpPair> = recommendedE2eGcps;
 
   it('basic score では PLANE-B が先着する（AC-m1-2 の期待と逆になる）', async () => {
     const result = await estimateCrs(recommended, [planeA, planeB], {
       transformer: mockTransformer,
+      chirality: 'direct-only',
     });
     expect(result.ranked.map((r) => `${r.authority}:${r.code}`)).toEqual([
       'MOCK:PLANE-B',
@@ -207,5 +212,67 @@ describe('実測固定: fixture の recommendedE2eGcps（反射あり）に対�
     expect(fitPlain.worldFile?.xScale).toBe(fitPlain.worldFile?.yScale);
     // 反射ありのセットでは similarity の SSE が大きく、affine が採用される
     expect(fitA.debug?.sseSimilarity as number).toBeGreaterThan(1e8);
+  });
+});
+
+describe('chirality 正規化（既定）: fixture の recommendedE2eGcps（反射あり）', () => {
+  const reflected: ReadonlyArray<GcpPair> = recommendedE2eGcps;
+  /** 同じ点で pixel の v を反転した、反射なしの入力。 */
+  const unreflected: GcpPair[] = recommendedE2eGcps.map((g) => ({
+    pixel: [g.pixel[0], -g.pixel[1]],
+    geo: g.geo,
+  }));
+
+  it('反射ありでも PLANE-A が ranked[0] で、selected.worldFile.yScale が負になる', async () => {
+    const result = await estimateCrs(reflected, [planeA, planeB], {
+      transformer: mockTransformer,
+    });
+    expect(result.ranked.map((r) => `${r.authority}:${r.code}`)).toEqual([
+      'MOCK:PLANE-A',
+      'MOCK:PLANE-B',
+    ]);
+    expect(result.selected?.identity).toEqual({ authority: 'MOCK', code: 'PLANE-A' });
+    expect(result.selected?.worldFile.yScale as number).toBeLessThan(0);
+    expectWorldFileClose(result.selected?.worldFile as WorldFile, {
+      xScale: 869.6875,
+      xSkew: 0,
+      xOrigin: 0,
+      ySkew: 0,
+      yScale: -869.6875,
+      yOrigin: 0,
+    });
+  });
+
+  it('反射ありの ranked の rmsMeters は、同じ点の反射なしの値と相対 1e-9 以内で一致する', async () => {
+    const withReflection = await estimateCrs(reflected, [planeA, planeB], {
+      transformer: mockTransformer,
+    });
+    const withoutReflection = await estimateCrs(unreflected, [planeA, planeB], {
+      transformer: mockTransformer,
+    });
+    expect(withReflection.ranked.map((r) => r.code)).toEqual(withoutReflection.ranked.map((r) => r.code));
+    for (let i = 0; i < withReflection.ranked.length; i += 1) {
+      const a = withReflection.ranked[i].rmsMeters;
+      const b = withoutReflection.ranked[i].rmsMeters;
+      expect(Math.abs(a - b)).toBeLessThanOrEqual(1e-9 * Math.max(1, Math.abs(b)));
+    }
+  });
+
+  it('worldFile は xSkew と yScale の符号だけが反転している（反射なしの入力の結果と比べて）', async () => {
+    const withReflection = await estimateCrs(reflected, [planeA, planeB], {
+      transformer: mockTransformer,
+    });
+    const withoutReflection = await estimateCrs(unreflected, [planeA, planeB], {
+      transformer: mockTransformer,
+    });
+    const a = withReflection.selected?.worldFile as WorldFile;
+    const b = withoutReflection.selected?.worldFile as WorldFile;
+    expect(a.xScale).toBe(b.xScale);
+    expect(a.xSkew).toBe(0 - b.xSkew);
+    expect(a.xOrigin).toBe(b.xOrigin);
+    expect(a.ySkew).toBe(b.ySkew);
+    expect(a.yScale).toBe(-b.yScale);
+    expect(a.yOrigin).toBe(b.yOrigin);
+    expect(b.yScale).toBeGreaterThan(0);
   });
 });

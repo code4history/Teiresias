@@ -10,7 +10,7 @@
  * 入らない ∴ 本ファイルが `@c4h/atlas` を import することは【C7】に反しない
  * （テストが engine を注入するのと同じ位置づけである。設計 §4.4）。
  */
-import { GCP_LONLAT, KYOTO_EXTENT, TRUE_ID } from './estimate-scene.js';
+import { DEFAULT_SCENE } from './scenes.js';
 
 let atlasModulePromise;
 let runtimePromise;
@@ -67,61 +67,85 @@ export function loadEngine() {
 /**
  * 候補 CRS を読む。
  *
- * - `zones`   … 隣接 zone を含めた 3 件（`EPSG:6674` / `6673` / `6675`）。
+ * - `scene`   … 場面（`demo/scenes.js`）。省略すると京都。範囲と隣接 zone の ID は場面が持つ。
+ * - `zones`   … 隣接 zone を含めた 3 件（京都なら `EPSG:6674` / `6673` / `6675`）。
  *               zone V / VI / VII を同時に含めるには CRS 側 bbox の膨張が要る
  *               （`bboxPaddingDeg: 0.7`。E2E の `catalogWide()` と同一設定）。
  * - `catalog` … padding を指定しない**既定カタログ全件**（実運用どおりの呼び出し）。
  *               縮退クラス `EPSG:2448 = EPSG:6674 = ESRI:112206` を含む。
+ * - `catalog-custom` … 陸上だけの絞り込みを外した既定カタログ全件（海域を含む現代の CRS も入る）に、
+ *               custom の定義（歴史グリッド）を足す。custom の帯は陸上だけの絞り込みでは候補に
+ *               残らないため `onshoreOnly: false` で引く。
  */
-export async function loadCandidates(mode) {
+export async function loadCandidates(mode, scene = DEFAULT_SCENE) {
   const { listProjectedCrsFromProjWasm } = await loadAtlasRuntime();
   if (mode === 'zones') {
     const wide = await listProjectedCrsFromProjWasm({
-      extent: KYOTO_EXTENT,
+      extent: scene.extent,
       area: 'Japan',
       onshoreOnly: true,
       bboxPaddingDeg: 0.7,
     });
-    const wanted = ['EPSG:6674', 'EPSG:6673', 'EPSG:6675'];
     const byId = new Map(wide.map((row) => [row.id, row]));
-    return wanted.filter((id) => byId.has(id)).map((id) => byId.get(id));
+    return scene.zones.filter((id) => byId.has(id)).map((id) => byId.get(id));
+  }
+
+  if (mode === 'catalog-custom') {
+    return listProjectedCrsFromProjWasm({
+      extent: scene.extent,
+      area: 'Japan',
+      onshoreOnly: false,
+      includeCustomProjections: true,
+    });
   }
 
   return listProjectedCrsFromProjWasm({
-    extent: KYOTO_EXTENT,
+    extent: scene.extent,
     area: 'Japan',
     onshoreOnly: true,
   });
 }
 
 /**
- * `CandidateTransformer` を作る（E2E `estimate-crs.real-engine.e2e.test.ts` の
- * `makeTransformer` と**同形**）。
+ * `CandidateTransformer` を作る。生成は Atlas の公開 adapter `createCandidateTransformer` に任せ、
+ * 本ファイルは `@c4h/atlas` の動的 import を待つ包みだけを持つ（E2E
+ * `estimate-crs.real-engine.e2e.test.ts` と同じ adapter を使う）。
  *
- * `geoBasis` gate: この Atlas export は `lonlat_deg` / lon-lat 順の入力専用である ∴
- * 非 lonlat の basis を渡されたら黙って誤変換せず、契約 (4)「業務的変換不能」へ落とす。
+ * - `geoBasis` が `lonlat_deg` / lon-lat 順でなければ `null`、知らない id も `null`
+ *   （契約 (7)「業務的変換不能」）。実装側の失敗は throw で伝わる（契約 (7)）。
+ * - `rows` は呼び出し時に写す（後から `rows` を書き換えても結果は変わらない）。`unit` も写す —
+ *   落とすと、単位が metre でない定義（歴史グリッドの yard）が「変換できなかった候補」になる。
  */
 export function makeTransformer(rows) {
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  return async (id, points, geoBasis) => {
-    if (geoBasis.kind !== 'lonlat_deg' || geoBasis.axisOrder !== 'lon-lat') return null;
-    const target = byId.get(id);
-    if (target === undefined) return null;
-    const { transformLonLatArrayToProjected } = await loadAtlasRuntime();
-    return transformLonLatArrayToProjected(target, points);
-  };
+  const snapshot = rows.map((row) => ({
+    id: row.id,
+    proj4: row.proj4,
+    ...(row.unit ? { unit: { ...row.unit } } : {}),
+  }));
+  const transformerPromise = loadAtlasRuntime().then(({ createCandidateTransformer }) =>
+    createCandidateTransformer(snapshot),
+  );
+  return async (id, points, geoBasis) => (await transformerPromise)(id, points, geoBasis);
 }
 
-/** 真値 `EPSG:6674` へ `GCP_LONLAT` を投影する（pixel 格子の元になる座標）。 */
-export async function projectTruth(rows) {
-  const { transformLonLatArrayToProjected } = await loadAtlasRuntime();
-  const truth = rows.find((row) => row.id === TRUE_ID);
+/**
+ * 場面の真値（`scene.truthId`）へ場面の GCP（`scene.gcpLonLat`）を投影する
+ * （pixel 格子の元になる座標）。`scene` を省略すると京都。
+ *
+ * 真値が metre でない定義（歴史グリッドの yard）でも座標を作れるよう、単位つきの
+ * 変換の点列を使う。返す座標の単位は真値の行の単位であり、pixel 格子の縮尺はその単位の
+ * 10 単位/pixel である。
+ */
+export async function projectTruth(rows, scene = DEFAULT_SCENE) {
+  const { transformLonLatToCandidate } = await loadAtlasRuntime();
+  const truthId = scene.truthId;
+  const truth = rows.find((row) => row.id === truthId);
   if (truth === undefined) {
-    throw new Error(`候補カタログに真値 ${TRUE_ID} が含まれていない`);
+    throw new Error(`候補カタログに真値 ${truthId} が含まれていない`);
   }
-  const projected = await transformLonLatArrayToProjected(truth, GCP_LONLAT);
-  if (projected === null) {
-    throw new Error(`真値 ${TRUE_ID} への変換が null を返した`);
+  const converted = await transformLonLatToCandidate(truth, scene.gcpLonLat);
+  if (converted === null) {
+    throw new Error(`真値 ${truthId} への変換が null を返した`);
   }
-  return projected;
+  return converted.points;
 }

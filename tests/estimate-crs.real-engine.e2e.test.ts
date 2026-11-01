@@ -17,16 +17,25 @@
  * （`Atlas/src` / `Teiresias/src` / `Daedalus`）へは置かない（設計 K13。置いた時点で
  * 「反射をどう扱うか」を m2a が決めたことになり、m2b の所有事項を侵す）。
  */
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import {
+  createCandidateTransformer,
   listProjectedCrsFromProjWasm,
   transformLonLatArrayToProjected,
+  transformLonLatToCandidate,
   type ProjectedCrsInfo,
 } from '@c4h/atlas';
 
 import { estimateCrs } from '../src/index.js';
-import type { CandidateCrs, CandidateTransformer, EstimationResult } from '../src/index.js';
+import type { CandidateCrs, EstimationResult } from '../src/index.js';
+
+import { REAL_ENGINE_TEST_TIMEOUT_MS } from './fixtures/timeouts.js';
+
+// 実 engine の初回のカタログ読み込み（proj.db の展開）は、最初に呼んだテストが払う。既定の
+// 5 秒では負荷ありで落ちるので、実 engine を使うファイルに共通の timeout をファイル単位で付ける
+// （値と決め方は tests/fixtures/timeouts.ts）。
+vi.setConfig({ testTimeout: REAL_ENGINE_TEST_TIMEOUT_MS });
 
 // ---------------------------------------------------------------------------
 // 実カタログ（ハードコードした ProjectedCrsInfo は作らない。カタログ経路を E2E に含める）
@@ -93,21 +102,15 @@ function pickById(rows: readonly ProjectedCrsInfo[], ids: readonly string[]): Pr
   });
 }
 
-/**
- * adapter glue。Teiresias `src` には置かず、テストが注入するだけである（【C7】engine 直参照禁止）。
+/*
+ * adapter glue は Atlas の公開 adapter `createCandidateTransformer` を使う。Teiresias `src` には
+ * 置かず、テストが注入するだけである（【C7】engine 直参照禁止）。
  *
- * `geoBasis` gate: 本 Atlas export は `lonlat_deg` / lon-lat 順の入力専用である（設計 K3）。
- * 非 lonlat の basis を渡されたら黙って誤変換せず、契約 (4)「業務的変換不能」へ落とす。
+ * 挙動: `geoBasis` が `lonlat_deg` / lon-lat 順でなければ `null`（黙って誤変換せず、契約 (7)
+ * 「業務的変換不能」へ落とす）、知らない id は `null`、それ以外は
+ * `transformLonLatArrayToProjected` の結果。実装側の失敗は `null` ではなく throw で伝わる
+ * （契約 (7)「throw は adapter bug のときだけ」）。
  */
-function makeTransformer(rows: readonly ProjectedCrsInfo[]): CandidateTransformer {
-  const byId = new Map(rows.map((row) => [row.id, row]));
-  return (id, points, geoBasis) => {
-    if (geoBasis.kind !== 'lonlat_deg' || geoBasis.axisOrder !== 'lon-lat') return null;
-    const target = byId.get(id);
-    if (target === undefined) return null;
-    return transformLonLatArrayToProjected(target, points);
-  };
-}
 
 // ---------------------------------------------------------------------------
 // GCP セットの構成（設計 §5.3 / K8）
@@ -340,10 +343,13 @@ describe('m2a-t1/AC-6: 実 engine を注入した estimateCrs（反射なしセ�
     const { forward } = await gcpSets();
 
     const result = await estimateCrs(forward, candidates, {
-      transformer: makeTransformer(candidates),
+      transformer: createCandidateTransformer(candidates),
     });
 
     expect(result.untransformableIds).toEqual([]);
+    // Atlas の公開 adapter は通常の経路で実装側の失敗を出さない（出せば failed になる）
+    expect(result.failure).toBeNull();
+    expect(result.status).not.toBe('failed');
     expect(result.ranked).toHaveLength(3);
     expect(rankedIds(result)[0]).toBe(TRUE_ID);
 
@@ -359,10 +365,10 @@ describe('m2a-t1/AC-6: 実 engine を注入した estimateCrs（反射なしセ�
     const { forward } = await gcpSets();
 
     const straight = await estimateCrs(forward, candidates, {
-      transformer: makeTransformer(candidates),
+      transformer: createCandidateTransformer(candidates),
     });
     const reversed = await estimateCrs(forward, [...candidates].reverse(), {
-      transformer: makeTransformer(candidates),
+      transformer: createCandidateTransformer(candidates),
     });
 
     expect(rankedIds(reversed)).toEqual(rankedIds(straight));
@@ -382,7 +388,7 @@ describe('m2a-t1/AC-6: 実 engine を注入した estimateCrs（反射なしセ�
 // AC-7: 反射を含む実 GCP セットでの候補間相対順位（実測固定。K22）
 // ---------------------------------------------------------------------------
 
-describe('m2a-t1/AC-7: 実測固定 — 反射が候補弁別に与える影響（期待仕様の表明ではない）', () => {
+describe('AC-7: 実測固定・正規化なし（direct-only） — 反射が候補弁別に与える影響（期待仕様の表明ではない）', () => {
   /**
    * tolerance は**行ごとに違う**。設計 §3.5.4 の摂動感度表の当該行を転記する。
    * 一律の `1e-6` 相対ではない。表に無い値はテストへ焼かない（空欄＝未判定）。
@@ -474,7 +480,8 @@ describe('m2a-t1/AC-7: 実測固定 — 反射が候補弁別に与える影響�
     const candidates = pickById(await catalogWide(), REQUIRED_IDS);
     const sets = await gcpSets();
     return estimateCrs(reflectedSet ? sets.reflected : sets.forward, candidates, {
-      transformer: makeTransformer(candidates),
+      transformer: createCandidateTransformer(candidates),
+      chirality: 'direct-only',
     });
   }
 
@@ -542,10 +549,10 @@ describe('m2a-t1/AC-7: 実測固定 — 反射が候補弁別に与える影響�
   it('(d) 既定カタログ 5 件を絞らずに使うと、反射ありで真値が ranked[0] から落ちる', async () => {
     const candidates = await catalogDefault();
     const sets = await gcpSets();
-    const transformer = makeTransformer(candidates);
+    const transformer = createCandidateTransformer(candidates);
 
-    const reflectedResult = await estimateCrs(sets.reflected, candidates, { transformer });
-    const forwardResult = await estimateCrs(sets.forward, candidates, { transformer });
+    const reflectedResult = await estimateCrs(sets.reflected, candidates, { transformer, chirality: 'direct-only' });
+    const forwardResult = await estimateCrs(sets.forward, candidates, { transformer, chirality: 'direct-only' });
 
     expect(reflectedResult.untransformableIds).toEqual([]);
     const reflectedIds = rankedIds(reflectedResult);
@@ -580,7 +587,7 @@ describe('m2a-t1/AC-7: 実測固定 — 反射が候補弁別に与える影響�
 // AC-13: 反射判定の実 engine 成立性（実測固定。人間追加入力への回答）
 // ---------------------------------------------------------------------------
 
-describe('m2a-t1/AC-13: 実測固定 — 符号付き面積・部分集合多数決による反射判定', () => {
+describe('AC-13: 実測固定・正規化なし（direct-only） — 符号付き面積・部分集合多数決による反射判定', () => {
   /**
    * 判定結果は診断値であり、ranking にも AC-6 にも影響させない（設計 §5.6.1 / K13）。
    * 反射時の挙動を決めるのは m2b である。
@@ -637,10 +644,10 @@ describe('m2a-t1/AC-13: 実測固定 — 符号付き面積・部分集合多数
   it('verdict === reflected と真値候補の basic RMS 劣化が同時に起きる（対応関係）', async () => {
     const candidates = pickById(await catalogWide(), REQUIRED_IDS);
     const sets = await gcpSets();
-    const transformer = makeTransformer(candidates);
+    const transformer = createCandidateTransformer(candidates);
 
-    const forwardResult = await estimateCrs(sets.forward, candidates, { transformer });
-    const reflectedResult = await estimateCrs(sets.reflected, candidates, { transformer });
+    const forwardResult = await estimateCrs(sets.forward, candidates, { transformer, chirality: 'direct-only' });
+    const reflectedResult = await estimateCrs(sets.reflected, candidates, { transformer, chirality: 'direct-only' });
 
     const reflectedReports = await reportsFor(true);
     expect((reflectedReports.get(TRUE_ID) as ReflectionReport).verdict).toBe('reflected');
@@ -652,8 +659,8 @@ describe('m2a-t1/AC-13: 実測固定 — 符号付き面積・部分集合多数
   it('判定は ranking へ影響しない（反射ありでも ranked は helper 非依存のまま）', async () => {
     const candidates = pickById(await catalogWide(), REQUIRED_IDS);
     const sets = await gcpSets();
-    const transformer = makeTransformer(candidates);
-    const result = await estimateCrs(sets.reflected, candidates, { transformer });
+    const transformer = createCandidateTransformer(candidates);
+    const result = await estimateCrs(sets.reflected, candidates, { transformer, chirality: 'direct-only' });
     expect(result.ranked).toHaveLength(3);
     expect(result.untransformableIds).toEqual([]);
   });
@@ -725,5 +732,157 @@ describe('m2a-t1/AC-14: 実測固定 — PROJ-5 文字列が同一へ潰れる a
       DIFF_TO_30166_METERS,
       DEGENERATE_DIFF_RELATIVE_TOLERANCE,
     );
+  });
+});
+
+// ---------------------------------------------------------------------------
+// chirality 正規化（既定）: 既定カタログで反射の有無によらず真値の縮退クラスが先頭を占める
+// ---------------------------------------------------------------------------
+
+describe('chirality 正規化（既定）: 実 engine・既定カタログ', () => {
+  /** 候補のうち `proj4` が真値と一致するもの（真値の縮退クラス）。大きさは実行時に決まる。 */
+  async function truthClass(rows: readonly ProjectedCrsInfo[]): Promise<string[]> {
+    const [truth] = pickById(rows, [TRUE_ID]);
+    return rows.filter((row) => row.proj4 === truth.proj4).map((row) => row.id).sort();
+  }
+
+  async function run(reflectedSet: boolean): Promise<{ result: EstimationResult; klass: string[] }> {
+    const candidates = await catalogDefault();
+    const sets = await gcpSets();
+    const result = await estimateCrs(reflectedSet ? sets.reflected : sets.forward, candidates, {
+      transformer: createCandidateTransformer(candidates),
+    });
+    // 既定カタログでも Atlas の公開 adapter は実装側の失敗を出さない（反射あり／なし）
+    expect(result.failure).toBeNull();
+    expect(result.status).not.toBe('failed');
+    return { result, klass: await truthClass(candidates) };
+  }
+
+  it('反射なし: 真値の縮退クラスが ranked[0..k-1] と集合として一致し、EPSG:6674 を含む', async () => {
+    const { result, klass } = await run(false);
+    expect(klass).toContain(TRUE_ID);
+    expect(rankedIds(result).slice(0, klass.length).sort()).toEqual(klass);
+    expect(result.selected?.worldFile.yScale as number).toBeGreaterThan(0);
+  });
+
+  it('反射あり: 真値の縮退クラスが ranked[0..k-1] と集合として一致し、EPSG:6674 を含み、yScale が負', async () => {
+    const { result, klass } = await run(true);
+    expect(result.untransformableIds).toEqual([]);
+    expect(klass).toContain(TRUE_ID);
+    expect(rankedIds(result).slice(0, klass.length).sort()).toEqual(klass);
+    expect(result.selected?.worldFile.yScale as number).toBeLessThan(0);
+  });
+
+  it('反射ありの ranked の rmsMeters は反射なしの値と相対 1e-9 以内で一致する', async () => {
+    const forward = await run(false);
+    const reflected = await run(true);
+    expect(rankedIds(reflected.result)).toEqual(rankedIds(forward.result));
+    for (const entry of forward.result.ranked) {
+      const id = `${entry.authority}:${entry.code}`;
+      const a = rmsOf(reflected.result, id);
+      expect(Math.abs(a - entry.rmsMeters)).toBeLessThanOrEqual(1e-9 * Math.max(1, entry.rmsMeters));
+    }
+  });
+});
+
+// ---------------------------------------------------------------------------
+// 格子の単位が metre でない候補: その単位で作った pixel から推定する
+// ---------------------------------------------------------------------------
+
+const UTJCP_ID = 'UTJCP:ZONE-B';
+/** 都市計画図の格子の yard（1 yard = 0.9143985307444408 m）。 */
+const YARD_METRES = 0.9143985307444408;
+/** 1 pixel = 10 yard（格子の単位で 10）。 */
+const GRID_UNITS_PER_PIXEL = 10;
+
+let customCatalogPromise: Promise<ProjectedCrsInfo[]> | undefined;
+
+/**
+ * 京都の範囲・`area: 'Japan'`・custom の行を含み、沖合の行も残したカタログ。
+ * 歴史的な格子（`UTJCP`）の行は `includeCustomProjections: true` のときだけ入る。
+ */
+function customCatalog(): Promise<ProjectedCrsInfo[]> {
+  if (!customCatalogPromise) {
+    customCatalogPromise = listProjectedCrsFromProjWasm({
+      extent: KYOTO_EXTENT,
+      area: 'Japan',
+      onshoreOnly: false,
+      includeCustomProjections: true,
+    });
+  }
+  return customCatalogPromise;
+}
+
+/**
+ * 真値の CRS の単位で GCP の pixel を作る（1 pixel = `GRID_UNITS_PER_PIXEL` 単位・反射なし）。
+ * 単位が metre でない候補でも `transformLonLatToCandidate` がその単位の点列を返す。
+ */
+async function gcpsInGridUnits(
+  row: ProjectedCrsInfo,
+): Promise<Array<{ pixel: [number, number]; geo: [number, number] }>> {
+  const converted = await transformLonLatToCandidate(row, GCP_LONLAT);
+  if (converted === null) throw new Error(`${row.id} cannot project the points`);
+  const [e0, n0] = converted.points[0];
+  return GCP_LONLAT.map((geo, index) => ({
+    pixel: [
+      (converted.points[index][0] - e0) / GRID_UNITS_PER_PIXEL,
+      (converted.points[index][1] - n0) / GRID_UNITS_PER_PIXEL,
+    ],
+    geo: [geo[0], geo[1]],
+  }));
+}
+
+describe('格子の単位が metre でない候補（実 engine）', () => {
+  it('カタログは京都に UTJCP:ZONE-B を格子の単位（yard）つきで返し、EPSG:6674 も含む', async () => {
+    const rows = await customCatalog();
+    const ids = rows.map((row) => row.id);
+    expect(ids).toContain(UTJCP_ID);
+    expect(ids).toContain(TRUE_ID);
+    expect(ids.filter((id) => id.startsWith('UTJCP:'))).toEqual([UTJCP_ID]);
+
+    const truth = rows.find((row) => row.id === UTJCP_ID) as ProjectedCrsInfo;
+    expect(truth.unit).toEqual({ name: 'yard (Japan City Plans)', metresPerUnit: YARD_METRES });
+  });
+
+  it('UTJCP:ZONE-B の格子座標から作った pixel で ranked[0] が UTJCP:ZONE-B になる', async () => {
+    const candidates = await customCatalog();
+    const grid = await gcpsInGridUnits(candidates.find((row) => row.id === UTJCP_ID) as ProjectedCrsInfo);
+
+    const result = await estimateCrs(grid, candidates, {
+      transformer: createCandidateTransformer(candidates),
+    });
+
+    expect(result.failure).toBeNull();
+    expect(result.status).not.toBe('failed');
+    expect(result.untransformableIds).toEqual([]);
+    expect(rankedIds(result)[0]).toBe(UTJCP_ID);
+    expect(rankedIds(result).length).toBeGreaterThan(1);
+    expect(result.selected?.unit).toEqual({ name: 'yard (Japan City Plans)', metresPerUnit: YARD_METRES });
+    // rmsMeters は全候補で比べられるよう metre のまま（worldFile だけが格子の単位）
+    expect(Number.isFinite(result.selected?.rmsMeters as number)).toBe(true);
+    expect(result.ranked.every((entry) => entry.unit.metresPerUnit > 0)).toBe(true);
+    // pixel は 1 つ 10 yard で作ったので、格子の単位の worldFile の倍率は 10（metre なら約 10.94）
+    const worldFile = result.selected?.worldFile as NonNullable<EstimationResult['selected']>['worldFile'];
+    expect(Math.hypot(worldFile.xScale, worldFile.xSkew)).toBeCloseTo(GRID_UNITS_PER_PIXEL, 6);
+  });
+
+  it('同じ候補に EPSG:6674 から作った pixel を渡すと ranked[0..k-1] が EPSG:6674 の縮退クラスになる', async () => {
+    const candidates = await customCatalog();
+    const truth = candidates.find((row) => row.id === TRUE_ID) as ProjectedCrsInfo;
+    const klass = candidates
+      .filter((row) => row.proj4 === truth.proj4)
+      .map((row) => row.id)
+      .sort();
+    expect(klass).toContain(TRUE_ID);
+
+    const metres = await gcpsInGridUnits(truth);
+    const result = await estimateCrs(metres, candidates, {
+      transformer: createCandidateTransformer(candidates),
+    });
+
+    expect(result.failure).toBeNull();
+    expect(result.status).not.toBe('failed');
+    expect(rankedIds(result).slice(0, klass.length).sort()).toEqual(klass);
+    expect(result.selected?.unit).toEqual({ name: 'metre', metresPerUnit: 1 });
   });
 });

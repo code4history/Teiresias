@@ -1,7 +1,7 @@
 # Project Context
 
 ## Purpose
-Teiresias orchestrates CRS estimation for Maplat V3.1 from GCPs and a supplied candidate CRS set.
+Teiresias orchestrates CRS estimation for Maplat from GCPs and a supplied candidate CRS set.
 
 ## Tech Stack
 - TypeScript (planned)

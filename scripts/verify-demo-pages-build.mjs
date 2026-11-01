@@ -81,4 +81,66 @@ for (const file of textFiles) {
   }
 }
 
+/**
+ * 版の表示: 画面のフッタに出す 3 つの package の版が、ビルドした JS に焼き込まれていること。
+ *
+ * 版は `vite.config.ts` の `define` が package.json から読んで焼く。dev server も同じ設定を
+ * 通る ∴ 手元と Pages で同じ値が出る。package.json は dist-demo に入らない ∴ 実行時に読む形に
+ * しない（読めない場所で版が消える）。ここでは焼き込まれた**値**と、その行に出す**名前**の
+ * 両方が成果物の JS に在ることを見る（3 つの版が同じ値でも検査が空振りしない）。
+ */
+const versionManifests = [
+  { name: "@c4h/atlas", manifest: new URL("../node_modules/@c4h/atlas/package.json", import.meta.url) },
+  { name: "@c4h/daedalus", manifest: new URL("../node_modules/@c4h/daedalus/package.json", import.meta.url) },
+  { name: "@c4h/teiresias", manifest: new URL("../package.json", import.meta.url) },
+];
+
+const scriptText = (
+  await Promise.all(textFiles.filter((file) => /\.(?:js|mjs)$/.test(file)).map((file) => readText(file)))
+).join("\n");
+
+for (const { name, manifest } of versionManifests) {
+  const { version } = JSON.parse(await readFile(manifest, "utf8"));
+  if (!scriptText.includes(version)) {
+    throw new Error(`built JS does not carry the version of ${name} (${version})`);
+  }
+  if (!scriptText.includes(name)) {
+    throw new Error(`built JS does not name ${name} in the version line`);
+  }
+}
+
+/**
+ * custom projection の定義（歴史グリッド）が成果物から取れること。
+ *
+ * `@c4h/atlas` の package build は同梱の定義ファイルを `data:application/json;base64,…` の
+ * 形で bundle に焼き込む。そのため `dist-demo` に別ファイルを複製せず、bundle に在る
+ * data URI を復号して、定義の中身（歴史グリッドの B 帯とその単位）まで確かめる。
+ * 定義が消えれば、この検査は赤になる。
+ */
+const customProjections = [];
+for (const match of scriptText.matchAll(/data:application\/json;base64,([A-Za-z0-9+/=]+)/g)) {
+  let parsed;
+  try {
+    parsed = JSON.parse(Buffer.from(match[1], "base64").toString("utf8"));
+  } catch {
+    continue;
+  }
+  const definitions = Array.isArray(parsed) ? parsed : parsed?.projections;
+  if (Array.isArray(definitions)) {
+    customProjections.push(...definitions);
+  }
+}
+
+const historicalZone = customProjections.find(
+  (definition) => definition?.authority === "UTJCP" && definition?.code === "ZONE-B",
+);
+if (historicalZone === undefined) {
+  throw new Error("built JS does not carry the custom projection definitions (UTJCP:ZONE-B)");
+}
+if (historicalZone.unit?.metresPerUnit !== 0.9143985307444408) {
+  throw new Error(
+    `custom projection UTJCP:ZONE-B does not carry the yard unit (${historicalZone.unit?.metresPerUnit})`,
+  );
+}
+
 console.log("dist-demo Pages artifact verified.");
