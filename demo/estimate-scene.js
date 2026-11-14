@@ -1,12 +1,11 @@
 /**
- * デモの計算層（m3-t1 設計 v1.3 §5.4）。
+ * デモの計算層。
  *
  * **純関数だけを置く。** DOM も `@c4h/atlas` も参照しない — 候補 CRS と
  * `CandidateTransformer` は引数で受け取る。これは Teiresias 自身の設計原理
- * （`estimateCrs` が transformer を注入で受ける）と同型である（設計 §7）。
+ * （`estimateCrs` が transformer を注入で受ける）と同型である。
  *
- * 公開関数の契約の正本は設計 §5.4 の表である。本ファイルはその実装であり、
- * 契約を再定義しない。
+ * 本ファイルはデモが使う公開関数の実装である。
  */
 import { estimateCrs } from '../src/index.ts';
 import { DEFAULT_SCENE } from './scenes.js';
@@ -29,10 +28,10 @@ export const METERS_PER_PIXEL = 10;
 export const TRUE_ID = DEFAULT_SCENE.truthId;
 
 /**
- * 「識別力が潰れている」の表示閾値（設計 K7）。
+ * 「識別力が潰れている」の表示閾値。
  *
  * **物理的な意味を持つ定数ではなく、表示のための閾値である。** 反射ありの実測比が
- * `1.000199…`、反射なしが `4.89e+10` である（設計 §5.2）∴ 両者を分ける任意の値でよい。
+ * `1.000199…`、反射なしが `4.89e+10` である ∴ 両者を分ける任意の値でよい。
  */
 export const COLLAPSE_THRESHOLD = 1.01;
 

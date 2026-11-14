@@ -304,6 +304,8 @@ verify:demo・verify:demo-bundle）が走る。公開は GitHub Actions（`.gith
 （順位づけ）の推定パイプラインをブラウザで触れるデモである。`@c4h/atlas` の `dist` を解決する
 ため、**先に Atlas も build しておくこと**。
 
+- 公開デモ（GitHub Pages）: `https://code4history.dev/Teiresias/`
+
 ```bash
 # 開発サーバ
 pnpm run dev

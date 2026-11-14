@@ -1,23 +1,22 @@
 /**
- * デモの DOM 結線層（m3-t1 設計 v1.3 §5.4）。
+ * デモの DOM 結線層。
  *
  * **計算を書かない。** 計算は `estimate-scene.js`（純関数）、engine 接続は
  * `atlas-engine.js` にある。本ファイルは `engine` を**注入**で受け取り、既定値だけを
  * `atlas-engine.js` に置く（`estimateCrs` が transformer を注入で受けるのと同型）。
  *
- * ## 本ファイルに課された 2 つの構造要件（設計 §5.4）
+ * ## 本ファイルに課された 2 つの構造要件
  *
- * **(1) canvas 2D コンテキストの null 耐性（K21 / m3-t1/AC-6(f)）**
+ * **(1) canvas 2D コンテキストの null 耐性**
  * jsdom は canvas 2D を実装しない ∴ `getContext('2d')` は `null` を返す。
  * 初期化・計算・表結線・イベント結線は **ctx が null でも最後まで完了する**。
  * 描画関数は先頭で `if (!ctx) return;` する（呼出側に条件分岐を撒かない）。
  * ヒットテストは ctx に依存させず `getBoundingClientRect()` と数値座標で行う。
- * **テスト側で `getContext` を stub する道は採らない**（採ると AC-6(f) を検査したことに
- * ならない）。これは `Atlas/demo/main.js:166-167`（無条件に取得する）からの意図的な逸脱である。
+ * **テスト側で `getContext` を stub する道は採らない**（採ると canvas が無い環境での
+ * 完走を検査したことにならない）。これは `Atlas/demo/main.js:166-167`（無条件に取得する）からの意図的な逸脱である。
  *
- * **(2) DOM 挿入は `textContent` / DOM API のみ（K20 / m3-t1/AC-7）**
- * outer の sink 走査（`scripts/m1-t4/verify-html-sinks.mjs`）は `REPOS` に Teiresias を
- * 持たず、走査サブディレクトリにも `demo` が無い ∴ **本ファイルはどの sink 走査にも
+ * **(2) DOM 挿入は `textContent` / DOM API のみ**
+ * `demo/` は HTML sink の自動走査の対象外である ∴ **本ファイルはどの sink 走査にも
  * 覆われない**。走査で守れない分を構成で守る — **HTML 文字列を直接 DOM へ流し込む
  * 3 種の sink API を 1 箇所も使わない**（禁止対象の名前は `tests/publish-and-demo.test.ts`
  * の needle 表が正本である。ここに literal で書くと、その assert が自分自身を検出して
