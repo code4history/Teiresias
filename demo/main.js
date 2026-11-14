@@ -16,8 +16,8 @@
  * 完走を検査したことにならない）。これは `Atlas/demo/main.js:166-167`（無条件に取得する）からの意図的な逸脱である。
  *
  * **(2) DOM 挿入は `textContent` / DOM API のみ**
- * `demo/` は HTML sink の自動走査の対象外である ∴ **本ファイルはどの sink 走査にも
- * 覆われない**。走査で守れない分を構成で守る — **HTML 文字列を直接 DOM へ流し込む
+ * 共通の HTML sink 走査はこのリポジトリを対象にしない。∴ 本リポジトリのテスト
+ * （`tests/publish-and-demo.test.ts`）が唯一の検査である。走査で守れない分を構成で守る — **HTML 文字列を直接 DOM へ流し込む
  * 3 種の sink API を 1 箇所も使わない**（禁止対象の名前は `tests/publish-and-demo.test.ts`
  * の needle 表が正本である。ここに literal で書くと、その assert が自分自身を検出して
  * 常に RED になる — `tests/package-shape.test.ts` が needle を断片から組み立てて

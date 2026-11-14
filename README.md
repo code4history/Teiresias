@@ -332,7 +332,7 @@ verify:demo and verify:demo-bundle). Releases are published from GitHub Actions
 `Atlas` (projection) → `Daedalus` (fitting) → `Teiresias` (ranking) in a browser. Because it resolves
 the `dist` of `@c4h/atlas`, **build Atlas first as well**.
 
-- GitHub Pages target: `https://code4history.dev/Teiresias/`
+- Live demo (GitHub Pages): <https://code4history.dev/Teiresias/>
 
 ```bash
 # development server
