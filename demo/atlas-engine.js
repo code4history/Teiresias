@@ -1,14 +1,14 @@
 /**
- * Atlas adapter（m3-t1 設計 v1.3 §5.4）。
+ * Atlas adapter。
  *
  * `@c4h/atlas` を**動的 import** し、proj-wasm runtime の初期化・候補カタログの取得・
  * `CandidateTransformer` の生成を担う。**DOM を触らない。**
  *
- * 【C7】（Teiresias が engine を直参照しない）との関係: 不変条件は
+ * 「Teiresias は engine を直接参照しない」という不変条件との関係: この条件は
  * `Teiresias/tests/package-shape.test.ts` が `src` 全域走査で担保しており、`demo/` は
  * `src` ではなく `tsconfig.json` の `include: ["src/**\/*"]` により公開 package にも
- * 入らない ∴ 本ファイルが `@c4h/atlas` を import することは【C7】に反しない
- * （テストが engine を注入するのと同じ位置づけである。設計 §4.4）。
+ * 入らない ∴ 本ファイルが `@c4h/atlas` を import することはこの条件に反しない
+ * （テストが engine を注入するのと同じ位置づけである）。
  */
 import { DEFAULT_SCENE } from './scenes.js';
 
@@ -43,12 +43,12 @@ function loadAtlasRuntime() {
  * `@c4h/atlas` を 1 回だけ読み、proj-wasm runtime の初期化完了まで待つ。
  *
  * ⚠️ **`__TEIRESIAS_PROJ_WASM_ASSET_BASE_URL__` は本ファイルが設定する。**
- * 設計 K9 は proj-wasm の asset base URL のグローバル名を Atlas と分けると定めたが、
+ * 設計では proj-wasm の asset base URL のグローバル名を Atlas と分けると定めたが、
  * その global を**書く**のは Atlas 側のコード（`installProjWasmAssetResolver` が
  * `__ATLAS_PROJ_WASM_ASSET_BASE_URL__` を書く）である ∴ 名前を分けたままにすると
  * **書き手が居なくなり、worker URL の解決が既定へ落ちる**（実装で判明した接続点。
  * 設計は「同じ機構・名前だけ変える」としか書いていなかった）。
- * ∴ **Teiresias 側の global は Teiresias 側で書く。** これで K9 の名前空間分離を
+ * ∴ **Teiresias 側の global は Teiresias 側で書く。** これでグローバル名の分離を
  * 保ったまま、Atlas の setter に依存しない。
  */
 export function loadEngine() {

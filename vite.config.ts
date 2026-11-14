@@ -1,5 +1,5 @@
 /**
- * デモ専用の vite 設定（m3-t1 設計 v1.3 §6.2）。
+ * デモ専用の vite 設定。
  *
  * `Atlas/vite.config.ts` の適応であり、**差分だけ**を持つ（前例踏襲様式）:
  *
@@ -8,7 +8,7 @@
  * - `base` は `/Teiresias/`（Pages の repo 名）。
  * - `rollupOptions.input` は portal と `demo/crs-estimate-ranking.html` の 2 枚。
  * - proj-wasm の asset base URL のグローバル名は **`__TEIRESIAS_PROJ_WASM_ASSET_BASE_URL__`**
- *   （設計 K9。Atlas の `__ATLAS_…` と名前空間を分ける — 将来同一ページで両方を読み込んだ
+ *   （Atlas の `__ATLAS_…` と名前空間を分ける — 将来同一ページで両方を読み込んだ
  *   場合に衝突しないため）。
  * - `test` セクションは**置かない**（`vitest.config.ts` が既存 ∴ 二重定義を避ける）。
  * - cross-origin isolation のヘッダ 2 種と、それを注入する service worker は**入れない**
