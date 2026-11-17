@@ -268,8 +268,9 @@ final RMS を別名で公開する API は無い。
   区別できない。どちらが選ばれても world file の数値だけが違う。歴史グリッドと近くの現代の CRS の
   差は、正確な GCP でも数 cm である（実際の地図では GCP の誤差の方が大きい）。
 - **CLI は無い**: Teiresias はライブラリだけを提供する。コマンドラインの道具は無い。
-- **配布**: 本 package はまだ npm に公開していない（`private: true`）。`@c4h/daedalus` は
-  ローカル sibling の `link:../Daedalus` で解決している。
+- **配布**: 本 package は npm へ公開する設定（`private: false`・公開の workflow）を持つが、まだ 1 つの版も
+  公開していない。`@c4h/atlas` と `@c4h/daedalus` が npm に出るまでは、開発と CI では兄弟の checkout から
+  解決する（`ci/pnpm-workspace.ci.yaml`）。`package.json` は npm の範囲指定のまま持つ。
 
 ## 開発
 

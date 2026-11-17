@@ -162,7 +162,7 @@ describe('runtime dependency と公開 surface', () => {
    * Atlas は devDependencies にだけ置く（契約変更は依存 spec を同一変更で追随させる）。
    *
    * 以前の実装は `dependencies` と `devDependencies` の**両方**から Atlas を禁じていたが、
-   * 守るべき不変条件は「Teiresias の**実行時**に engine が入らないこと」【C7】である。
+   * 守るべき不変条件は「Teiresias の**実行時**に engine が入らないこと」である。
    * 全面禁止はその十分条件でありながら**テストからの engine 注入も不可能にし**、仕様正本
    * （実 engine E2E）と正面から矛盾する。runtime dependency の条件の文言自体が
    * 「型だけの Atlas import と区別される」と型専用参照の存在を前提にしている。
@@ -182,7 +182,7 @@ describe('runtime dependency と公開 surface', () => {
     expect(packageJson.dependencies['@c4h/atlas']).toBeUndefined();
   });
 
-  it('Teiresias src は Atlas を一切参照しない（fs 全域走査。C7 engine 直参照禁止）', () => {
+  it('Teiresias src は Atlas を一切参照しない（fs 全域走査。engine を直接参照しない）', () => {
     // needle は断片から組み立てる（本ファイルは tests/ 配下だが、走査範囲は src/ のみ ∴
     // 自己検出はしない。それでも以前の FORBIDDEN_NEEDLES と同じ配慮を残す）。
     // **走査範囲を tests/ へ広げてはならない** — 新 E2E 自身が必ずヒットする。
@@ -352,7 +352,7 @@ describe('scaffolding の結線', () => {
   /**
    * デモのビルド・検証に必要な 3 件は **devDependencies にだけ**入れる。
    * `proj-wasm` を `dependencies` へ入れると Teiresias の公開 package が engine に
-   * 依存することになり【C7】が package の形として破れる。
+   * 依存することになり、engine を直接参照しないという不変条件が package の形として破れる。
    */
   it('デモ用 devDependencies 3 件が入り、dependencies は増えていない', () => {
     expect(packageJson.devDependencies.vite).toBeTypeOf('string');
@@ -419,7 +419,7 @@ describe('scaffolding の結線', () => {
     expect(distFiles.length).toBeGreaterThan(0);
     expect(
       // `demo` を needle へ追加する。`demo/` は `@c4h/atlas` を
-      // import する ∴ dist へ混入すると【C7】（Teiresias が engine を直参照しない）が
+      // import する ∴ dist へ混入すると「Teiresias が engine を直接参照しない」が
       // 公開 package の形として破れる。tsconfig の `include: ["src/**/*"]` により構造上
       // 入らないが、**入らないことを機械で固定する**（被影響への追随ではなく追加である）。
       distFiles.filter((file) => /(^|\/)(tests?|fixtures|testkit|demo)(\/|$)/.test(file)),

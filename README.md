@@ -296,8 +296,10 @@ decision to persist or adopt is the responsibility of the Editor, not of the lib
   numbers in the world file change. The difference between a historical grid and a nearby modern CRS
   is a few centimetres even with exact GCPs (on a real map the GCP error is larger).
 - **No CLI**: Teiresias is a library only. There is no command-line interface.
-- **Distribution**: this package is not published to npm yet (`private: true`). `@c4h/daedalus` is
-  resolved through the local sibling `link:../Daedalus`.
+- **Distribution**: the package is set up to be published to npm (`private: false`, with a publish
+  workflow), but no version has been published yet. Until `@c4h/atlas` and `@c4h/daedalus` are on npm,
+  development and CI resolve them from sibling checkouts (`ci/pnpm-workspace.ci.yaml`); `package.json`
+  keeps the npm ranges.
 
 ## Development
 
