@@ -1,21 +1,21 @@
 /**
- * 実 Atlas engine を注入した `estimateCrs` の E2E（m2a-t1 設計 v1.5 §5.3 / §7）。
+ * 実 Atlas engine を注入した `estimateCrs` の E2E。
  *
  * 対応 AC:
- * - m2a-t1/AC-1(b): `selected.identity` から組んだ `${authority}:${code}` が Atlas の
+ * - `selected.identity` から組んだ `${authority}:${code}` が Atlas の
  *   `ProjectedCrsInfo.id` と一致する（実行時 identity 往復）
- * - m2a-t1/AC-6:    反射なしセットで真値 `EPSG:6674` が `ranked[0]`（実 engine E2E）
- * - m2a-t1/AC-7:    反射を含む実 GCP セットでの候補間相対順位の**実測固定**（K22）
- * - m2a-t1/AC-13:   符号付き面積・部分集合多数決による反射判定の実 engine 成立性の実測固定
- * - m2a-t1/AC-14:   縮退クラス（同一 proj4 へ潰れる authority エントリ集合）の実測固定
+ * - 反射なしセットで真値 `EPSG:6674` が `ranked[0]`（実 engine E2E）
+ * - 反射を含む実 GCP セットでの候補間相対順位の**実測固定**
+ * - 符号付き面積・部分集合多数決による反射判定の実 engine 成立性の実測固定
+ * - 縮退クラス（同一 proj4 へ潰れる authority エントリ集合）の実測固定
  *
  * **本 describe 群のうち「実測固定」と題したものは、期待する仕様の表明ではなく
- * 発見の可視化である**（m1-t1 の `estimate-crs.e2e.test.ts` の前例に踏襲）。
- * 反射時の挙動は本タスクでは変えない — 判定結果は ranking にも AC-6 にも影響させない。
+ * 発見の可視化である**（`estimate-crs.e2e.test.ts` の前例に踏襲）。
+ * 反射時の挙動はここでは変えない — 判定結果は ranking にも実 engine E2E にも影響させない。
  *
  * 反射判定 helper（§5.6）は**本ファイル内にだけ**置き、`export` しない。製品コード
- * （`Atlas/src` / `Teiresias/src` / `Daedalus`）へは置かない（設計 K13。置いた時点で
- * 「反射をどう扱うか」を m2a が決めたことになり、m2b の所有事項を侵す）。
+ * （`Atlas/src` / `Teiresias/src` / `Daedalus`）へは置かない（置いた時点で
+ * 「反射をどう扱うか」をここで決めたことになり、後続の設計の所有事項を侵す）。
  */
 import { describe, expect, it, vi } from 'vitest';
 
@@ -43,7 +43,7 @@ vi.setConfig({ testTimeout: REAL_ENGINE_TEST_TIMEOUT_MS });
 
 const KYOTO_EXTENT = { west: 135.6, south: 34.9, east: 135.9, north: 35.1 };
 
-/** 設計 §5.3 の GCP 地理座標 5 点（lon/lat 度・lon-lat 順）。 */
+/** GCP 地理座標 5 点（lon/lat 度・lon-lat 順）。 */
 const GCP_LONLAT: ReadonlyArray<readonly [number, number]> = [
   [135.6, 34.9],
   [135.9, 34.9],
@@ -56,13 +56,13 @@ const GCP_LONLAT: ReadonlyArray<readonly [number, number]> = [
 const METERS_PER_PIXEL = 10;
 
 const TRUE_ID = 'EPSG:6674';
-/** AC-6 / AC-7(a)(b)(c) が使う 3 件集合（zone V / VI / VII。互いに proj4 が異なる）。 */
+/** 実 engine E2E と相対順位の (a)(b)(c) が使う 3 件集合（zone V / VI / VII。互いに proj4 が異なる）。 */
 const REQUIRED_IDS = ['EPSG:6674', 'EPSG:6673', 'EPSG:6675'] as const;
 
 let catalogDefaultPromise: Promise<ProjectedCrsInfo[]> | undefined;
 let catalogWidePromise: Promise<ProjectedCrsInfo[]> | undefined;
 
-/** (I) 既定カタログ — AC-7(d) / AC-14 が使う。padding を指定しない実運用どおりの呼び出し。 */
+/** (I) 既定カタログ — 相対順位の (d) と縮退クラスが使う。padding を指定しない実運用どおりの呼び出し。 */
 function catalogDefault(): Promise<ProjectedCrsInfo[]> {
   if (!catalogDefaultPromise) {
     catalogDefaultPromise = listProjectedCrsFromProjWasm({
@@ -75,9 +75,9 @@ function catalogDefault(): Promise<ProjectedCrsInfo[]> {
 }
 
 /**
- * (II) 明示 padding カタログ — AC-6 / AC-7(a)(b)(c) が使う。
+ * (II) 明示 padding カタログ — 実 engine E2E と相対順位の (a)(b)(c) が使う。
  *
- * zone V / VI / VII を同時に含めるには CRS 側 bbox の膨張が要る（設計 §3.5.1 の不足量
+ * zone V / VI / VII を同時に含めるには CRS 側 bbox の膨張が要る（不足量
  * 0.43° / 0.62°）。これは「候補が得られるように緩めた」のではなく、**隣接 zone を候補に
  * 含めた探索という実運用でありうる設定を明示的に選んだ**ものである。
  */
@@ -113,7 +113,7 @@ function pickById(rows: readonly ProjectedCrsInfo[], ids: readonly string[]): Pr
  */
 
 // ---------------------------------------------------------------------------
-// GCP セットの構成（設計 §5.3 / K8）
+// GCP セットの構成
 // ---------------------------------------------------------------------------
 
 interface GcpSets {
@@ -153,7 +153,7 @@ function gcpSets(): Promise<GcpSets> {
 }
 
 // ---------------------------------------------------------------------------
-// 反射判定 helper（設計 §5.6。本ファイル内の非 export helper）
+// 反射判定 helper（本ファイル内の非 export helper）
 // ---------------------------------------------------------------------------
 
 type ReflectionVerdict = 'reflected' | 'forward' | 'undetermined';
@@ -172,8 +172,8 @@ type Point2 = readonly [number, number];
  * 3 点の共分散行列の固有値比 `λ2/λ1`。
  *
  * `Daedalus/src/fitting/similarity.ts:228-250` と**同形**の再実装である（import しない —
- * 当該量は `@c4h/daedalus` の公開 export に無く、`Daedalus/src` 直参照は AC-T2 の禁止
- * needle に該当し、Daedalus は m0 凍結である。設計 §5.6.4 / 案 F）。
+ * 当該量は `@c4h/daedalus` の公開 export に無く、`Daedalus/src` 直参照は禁止 import の
+ * needle に該当し、Daedalus の実装は固定である）。
  */
 function eigRatio(a: Point2, b: Point2, c: Point2): number {
   const points = [a, b, c];
@@ -211,7 +211,7 @@ function signedArea2(a: Point2, b: Point2, c: Point2): number {
 }
 
 /**
- * 三角形の部分集合（設計 §5.6.3・K14）。
+ * 三角形の部分集合。
  *
  * `n <= 12` は `C(n,3)` の全組合せ（標本の選び方という自由度そのものを消せる）。
  * 超えるときは辞書式列挙を決定的に間引く（乱数は使わない）。
@@ -242,7 +242,7 @@ function triangleIndices(n: number): Array<[number, number, number]> {
  * 成立し、フィッティング不要で `O(n³)`（三角形数）。
  *
  * 縮退閾値は Daedalus の `DEFAULT_COLLINEARITY_THRESHOLD` と**同じ量・同じ値**（`0.01`）を
- * 使い、新しい閾値語彙を作らない（設計 K15）。pixel 側・投影側の**両側**を見る（`min`）。
+ * 使い、新しい閾値語彙を作らない。pixel 側・投影側の**両側**を見る（`min`）。
  */
 function judgeReflection(
   pixels: readonly Point2[],
@@ -292,7 +292,7 @@ function expectRelativeClose(actual: number, expected: number, relativeTolerance
 /**
  * 2 つの点列の「最大差」（点ごとのユークリッド距離の最大値・m）。
  *
- * 設計 §3.5.1 / AC-14 の `13.639282286267992` m はこの定義で測られている
+ * 縮退クラスの `13.639282286267992` m はこの定義で測られている
  * （成分ごとの最大差では `12.931680195499212` m になり別の量になる。実装時に両方を測って
  * 設計時プローブ値を全桁再現する側を採った）。
  */
@@ -318,10 +318,10 @@ function rankedIds(result: EstimationResult): string[] {
 }
 
 // ---------------------------------------------------------------------------
-// AC-6 / AC-1(b): 実 engine E2E
+// 実 engine E2E と実行時 identity 往復
 // ---------------------------------------------------------------------------
 
-describe('m2a-t1/AC-6: 実 engine を注入した estimateCrs（反射なしセット）', () => {
+describe('実 engine を注入した estimateCrs（反射なしセット）', () => {
   it('絞り込み前にカタログ実結果そのものを固定する（候補が消えた回帰を別失敗として捉える）', async () => {
     const wide = await catalogWide();
     const wideIds = new Set(wide.map((info) => info.id));
@@ -353,7 +353,7 @@ describe('m2a-t1/AC-6: 実 engine を注入した estimateCrs（反射なしセ�
     expect(result.ranked).toHaveLength(3);
     expect(rankedIds(result)[0]).toBe(TRUE_ID);
 
-    // AC-1(b): 実行時 identity 往復（Atlas の ProjectedCrsInfo.id と一致する）
+    // 実行時 identity 往復（Atlas の ProjectedCrsInfo.id と一致する）
     expect(result.selected).not.toBeNull();
     const selected = result.selected as NonNullable<EstimationResult['selected']>;
     expect(`${selected.identity.authority}:${selected.identity.code}`).toBe(TRUE_ID);
@@ -385,15 +385,15 @@ describe('m2a-t1/AC-6: 実 engine を注入した estimateCrs（反射なしセ�
 });
 
 // ---------------------------------------------------------------------------
-// AC-7: 反射を含む実 GCP セットでの候補間相対順位（実測固定。K22）
+// 反射を含む実 GCP セットでの候補間相対順位（実測固定）
 // ---------------------------------------------------------------------------
 
-describe('AC-7: 実測固定・正規化なし（direct-only） — 反射が候補弁別に与える影響（期待仕様の表明ではない）', () => {
+describe('相対順位の実測固定・正規化なし（direct-only） — 反射が候補弁別に与える影響（期待仕様の表明ではない）', () => {
   /**
-   * tolerance は**行ごとに違う**。設計 §3.5.4 の摂動感度表の当該行を転記する。
+   * tolerance は**行ごとに違う**。摂動感度を測った表の当該行を転記する。
    * 一律の `1e-6` 相対ではない。表に無い値はテストへ焼かない（空欄＝未判定）。
    *
-   * #1 AC-7(b-1) 反射なし `EPSG:6674` `rmsMeters`
+   * #1 (b-1) 反射なし `EPSG:6674` `rmsMeters`
    *   基準値 `7.321291122024597e-12` m / 変動源 1（実装間）`9.4553e-1`（相対）
    *   変動源 2（PROJ 感度・eps=1e-6 m）相対は**発散**・絶対で最大 `2.983364e-11` m
    *   必要 = 相対不可 ∴ 絶対 `3.0e-11` m / 採用 **`< 1e-6` m（絶対・上限のみ。値を焼かない）**
@@ -401,63 +401,63 @@ describe('AC-7: 実測固定・正規化なし（direct-only） — 反射が候
    *   ∵ この値は入力座標の 1 ulp（`1.4552e-11` m）と同程度の桁落ち量であり、値ではなく
    *     **厳密適合であること**を検査している。相対 tolerance を置ける帯が存在しない。
    *
-   * #2 AC-7(b-2) 反射なし `EPSG:6675`
+   * #2 (b-2) 反射なし `EPSG:6675`
    *   基準値 `3.5823637746029902e-1` m / 変動源 1 `0`（6 配置）/ 変動源 2 `5.3969e-6`
    *   必要 `5.4e-6` / 採用 **`1e-3` 相対** / 下限余裕 **2.27 桁**
    *   上限余裕 1.63 桁（`EPSG:6673` とは 43% 離れている ∴ 混同しない）
    *
-   * #3 AC-7(b-2) 反射なし `EPSG:6673`
+   * #3 (b-2) 反射なし `EPSG:6673`
    *   基準値 `5.1172910876252709e-1` m / 変動源 1 `0` / 変動源 2 `3.7775e-6`
    *   必要 `3.8e-6` / 採用 **`1e-3` 相対** / 下限余裕 **2.42 桁** / 上限余裕 1.63 桁
    *
-   * #4 AC-7(b-2) 反射あり `EPSG:6674`
+   * #4 (b-2) 反射あり `EPSG:6674`
    *   基準値 `1.5418504974201469e+4` m / 変動源 1 `1.1797e-16` / 変動源 2 `8.3376e-11`
    *   必要 `8.3e-11` / 採用 **`1e-6` 相対**（据置）/ 下限余裕 4.08 桁
    *   上限余裕 1.30 桁（候補取り違えは ≥2.0e-4 相対）
    *
-   * #5 AC-7(b-2) 反射あり `EPSG:6673`
+   * #5 (b-2) 反射あり `EPSG:6673`
    *   基準値 `1.5421583164607415e+4` m / 変動源 1 `0` / 変動源 2 `9.8502e-11`
    *   必要 `9.9e-11` / 採用 **`1e-6` 相対** / 下限余裕 4.01 桁 / 上限余裕 1.30 桁
    *
-   * #6 AC-7(b-2) 反射あり `EPSG:6675`
+   * #6 (b-2) 反射あり `EPSG:6675`
    *   基準値 `1.5421583165489425e+4` m / 変動源 1 `0` / 変動源 2 `9.8501e-11`
    *   必要 `9.9e-11` / 採用 **`1e-6` 相対** / 下限余裕 4.01 桁 / 上限余裕 1.30 桁
    *
-   * #7 AC-7(a) 反射なし 2 位・3 位の相対差
+   * #7 (a) 反射なし 2 位・3 位の相対差
    *   基準値 `2.9994918928e-1` / 変動源 1 `0` / 変動源 2 `2.1409e-5`（絶対 `6.4216e-6`）
    *   必要 `2.1e-5` / 採用 **閾値 `> 1e-2`**（据置）/ 下限余裕 1.48 桁 / 上限 対比 5 桁
    *
-   * #8 AC-7(a) 反射あり 2 位・3 位の相対差
+   * #8 (a) 反射あり 2 位・3 位の相対差
    *   基準値 `5.7193205290e-11` / 変動源 1 `0` / 変動源 2 絶対 `1.6315e-10` ∴ 最悪 `2.2034e-10`
    *   必要 `2.2e-10` / 採用 **閾値 `< 1e-7`** / 下限余裕 **2.66 桁**（旧 `1e-9` は 0.66 桁で不足）
    *
-   * #9 AC-7(c) 反射なし 真値と次点の RMS 比
+   * #9 (c) 反射なし 真値と次点の RMS 比
    *   基準値 `4.893077e+10` / 変動源 1 域 `[2.398886e+10, 4.403769e+11]`
    *   変動源 2 合成域 `[1.200778e+10, 4.403793e+11]` / 必要 最小 `1.2008e+10`
    *   採用 **閾値 `> 1e7`**（据置）/ 下限余裕 **3.08 桁** / 上限 対比 7 桁
    *
-   * #10 AC-7(c) 反射あり 真値と次点の RMS 比
+   * #10 (c) 反射あり 真値と次点の RMS 比
    *   基準値 `1.000199642599` / 変動源 1 `2.2200e-16` / 変動源 2 `1.6317e-10`
    *   必要 `1.6e-10` / 採用 **閾値 `< 1.001`**（据置）/ 下限余裕 **6.69 桁** / 上限 対比 7 桁
-   *   ※ R4-MIN-3: 表 #10 は「次点を identity 固定」モデルである。rank ベース（実際に
+   *   ※ 表 #10 は「次点を identity 固定」モデルである。rank ベース（実際に
    *     `ranked[1]` を次点に取る）で計算すると PROJ 感度は `1.8756e-10` となり、余裕は
    *     6.69 → **6.63 桁**へ動く。**閾値の判定は変わらない** ∴ 測り直さず脚注に留める。
    *
-   * #11 AC-7(d) 反射あり 相対差 `EPSG:3094`
+   * #11 (d) 反射あり 相対差 `EPSG:3094`
    *   基準値 `3.6120844592e-4` / 変動源 1 `6.5300e-13` / 変動源 2 `4.5172e-7`
    *   必要 `4.5e-7` / 採用 **`1e-3` 相対** / 下限余裕 **3.35 桁** / 上限余裕 2.5 桁
    *
-   * #12 AC-7(d) 反射あり 相対差 `EPSG:30166`
+   * #12 (d) 反射あり 相対差 `EPSG:30166`
    *   基準値 `1.1252316755e-4` / 変動源 1 `2.0967e-12` / 変動源 2 **`1.4503e-6`**
    *   必要 `1.5e-6` / 採用 **`1e-3` 相対**（旧 `1e-6` は **−0.16 桁**で不足していた）
    *   下限余裕 **2.84 桁** / 上限余裕 2.5 桁（2 値は互いに 69% 離れている ∴ 混同しない）
    */
   /**
-   * 焼いてある値は**実 `estimateCrs` の出力を実装時に測ったもの**である（§14 implementer 6）。
-   * 設計 §3.5.2 / §3.5.4 の値は Daedalus 本体を通していない設計時プローブだが、実測の結果
+   * 焼いてある値は**実 `estimateCrs` の出力を実装時に測ったもの**である。
+   * 設計時の値は Daedalus 本体を通していないプローブだが、実測の結果
    * **全桁一致した**（差分そのものが診断情報になるため、一致したことも記録する）。
    *
-   * assert しない観測値（K10 の観測義務。task-state へも転記する）:
+   * assert しない観測値:
    *   反射なし 真値と次点の RMS 比 = `48930765283.00024`（= `4.8930765283e+10`）
    *   反射あり 真値と次点の RMS 比 = `1.0001996425990132`
    *   反射なし 2 位・3 位の相対差   = `0.29994918928…`（表 #7 の基準値 `2.9994918928e-1` と一致）
@@ -514,11 +514,11 @@ describe('AC-7: 実測固定・正規化なし（direct-only） — 反射が候
     expect(rankedIds(reflectedResult).slice(1).sort()).toEqual(['EPSG:6673', 'EPSG:6675']);
   });
 
-  it('(a) 順位ではなく「2 位・3 位の相対差の桁」で現象を固定する（K16）', async () => {
+  it('(a) 順位ではなく「2 位・3 位の相対差の桁」で現象を固定する', async () => {
     const forwardResult = await runThreeSet(false);
     const reflectedResult = await runThreeSet(true);
 
-    // 「相対差」は設計 §3.5.2 / §3.5.4 #7 / #8 と同じ定義（差 ÷ 大きいほう = 3 位の値）を採る。
+    // 「相対差」は上の表の #7 / #8 と同じ定義（差 ÷ 大きいほう = 3 位の値）を採る。
     // 実測: 反射なし 0.29994918928…（表 #7 の 2.9994918928e-1 と一致）/
     //       反射あり 5.7193205293576197e-11（表 #8 の 5.7193205290e-11 と一致）
     const relativeGap = (result: EstimationResult): number => {
@@ -584,12 +584,12 @@ describe('AC-7: 実測固定・正規化なし（direct-only） — 反射が候
 });
 
 // ---------------------------------------------------------------------------
-// AC-13: 反射判定の実 engine 成立性（実測固定。人間追加入力への回答）
+// 反射判定の実 engine 成立性（実測固定）
 // ---------------------------------------------------------------------------
 
-describe('AC-13: 実測固定・正規化なし（direct-only） — 符号付き面積・部分集合多数決による反射判定', () => {
+describe('反射判定の実測固定・正規化なし（direct-only） — 符号付き面積・部分集合多数決による反射判定', () => {
   /**
-   * 判定結果は診断値であり、ranking にも AC-6 にも影響させない（設計 §5.6.1 / K13）。
+   * 判定結果は診断値であり、ranking にも実 engine E2E にも影響させない。
    * 反射時の挙動を決めるのは m2b である。
    *
    * #18（§3.5.4）: `reflect` / `forward` / `degenerate` の内訳は離散量であり、
@@ -667,10 +667,10 @@ describe('AC-13: 実測固定・正規化なし（direct-only） — 符号付�
 });
 
 // ---------------------------------------------------------------------------
-// AC-14: 縮退クラスの実測固定（K9 改訂）
+// 縮退クラスの実測固定
 // ---------------------------------------------------------------------------
 
-describe('m2a-t1/AC-14: 実測固定 — PROJ-5 文字列が同一へ潰れる authority エントリ集合', () => {
+describe('縮退クラスの実測固定 — PROJ-5 文字列が同一へ潰れる authority エントリ集合', () => {
   /**
    * #13（§3.5.4）: `EPSG:30166` との最大差 `13.639282286267992` m
    *   変動源 1 `0`（最小二乗を通らない差分）/ 変動源 2 `1.8582e-7` 相対（絶対 `2.5344e-6` m）

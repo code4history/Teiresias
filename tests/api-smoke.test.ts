@@ -1,10 +1,10 @@
 /**
- * 公開 API の compile-time smoke（m1-t1 設計 §3.1 / §8 AC-SCAFFOLD）。
+ * 公開 API の compile-time smoke。
  *
  * 本ファイルは `pnpm --ignore-workspace run test:types` が tsc CLI の**明示対象**にしている。
  * Vitest の transform は型を検査しないため、公開型の drift はこの経路でだけ検出できる。
  * ∴ 公開型の構造を**値の形**で束縛し、局所変異が TS エラーとして発火するようにしてある
- * （発火実証は m1-t1 設計 §15.2 T1 の義務。task-state に実測を記録する）。
+ * （局所変異で実際に発火することは実装時に実測した）。
  *
  */
 import { describe, expect, it } from 'vitest';
@@ -152,9 +152,9 @@ const selectedResult: EstimationResult = {
   failure: null,
 };
 
-// --- m2a-t1/AC-1(a): ProjectedCrsInfo → CandidateCrs の assignability ----------
+// --- ProjectedCrsInfo → CandidateCrs の assignability -------------------------
 // Atlas の `ProjectedCrsInfo` が Teiresias の `CandidateCrs` へ **型レベルで** assignable で
-// あることを固定する（仕様 v0.3 AC-m2a-1(a)）。値の生成は不要で、型だけで完結させる。
+// あることを固定する。値の生成は不要で、型だけで完結させる。
 // 本 assert が発火するのは tsc CLI 経路だけである — vitest は型を検査しない。
 //
 // ⚠️ **発火するのは `test:types:atlas`（moduleResolution Bundler）だけである。**
@@ -165,10 +165,10 @@ const selectedResult: EstimationResult = {
 //   `const probe: number = projectedCrsInfo;` を一時的に足すと
 //     NodeNext → exit 0（縮退している ∴ 検査が効いていない）
 //     Bundler  → `error TS2322: Type 'ProjectedCrsInfo' is not assignable to type 'number'`
-// ∴ 本 AC の検査経路として `test:types:atlas` を追加した（設計 §5.2 からの逸脱。理由は
+// ∴ この検査の経路として `test:types:atlas` を追加した（当初の置き場所からの変更。理由は
 // 設計が「`test:types` の明示対象は api-smoke.test.ts だけ」という前提のみで置き場所を決めており、
 // **その経路で型が実際に解決するか**を測っていなかったことにある）。
-// Atlas 側の d.ts 出力そのものの是正は本タスクの触り先外である ∴ findings として m2b へ渡す。
+// Atlas 側の d.ts 出力そのものの是正はこの変更の範囲外である。
 // 束縛は**純粋に型レベル**で行う（`declare const` + 代入だと、型は消えても代入文が残り
 // vitest 実行時に ReferenceError になる）。
 type AssertAssignableTo<Target, Source extends Target> = Source;

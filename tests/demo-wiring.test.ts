@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 /**
- * デモの DOM 結線 E2E（m3-t1 設計 v1.3 §9.1 / m3-t1/AC-6）。
+ * デモの DOM 結線 E2E。
  *
  * 対応 AC:
  * - (a) `#y-flip` の `change` で再計算が **1 回**起きる
@@ -13,18 +13,18 @@
  * - (f) `canvas.getContext('2d')` が `null` を返す環境で `initDemo` が例外を投げず、
  *       (a)〜(e) がすべて成立する
  *
- * ## (f) の検査の性格（設計 §5.4(1) / K21）
+ * ## (f) の検査の性格
  *
  * **jsdom は canvas 2D を実装していない** ∴ 補助 package（`canvas`）を入れない限り
  * `getContext('2d')` は `null` を返す。**本ファイルは `getContext` を stub しない** —
  * stub すると (f) を検査したことにならない。∴ **(a)〜(e) が通ること自体が (f) の証拠**で
  * あり、加えて `hasContext` が両方 `false` であることを明示 assert する。
  *
- * ## stub するもの / しないもの（設計 §5.4(1) の裁量事項。task-state にも記録する）
+ * ## stub するもの / しないもの
  *
  * | 対象 | 扱い | 理由 |
  * |---|---|---|
- * | `engine`（Atlas adapter） | **stub を注入** | 実 engine は AC-5 が受け持つ。本ファイルは結線だけを見る |
+ * | `engine`（Atlas adapter） | **stub を注入** | 実 engine は demo-scene.e2e.test.ts が受け持つ。本ファイルは結線だけを見る |
  * | `canvas.getContext` | **stub しない** | stub すると (f) が vacuous になる |
  * | `canvas.getBoundingClientRect` | **stub する** | jsdom は常に全 0 を返す ∴ ヒットテストが物理的に成立しない。
  *   これは「実装のロジックを再現する」stub ではなく、**レイアウト計算のない環境に寸法を与える**だけである |
@@ -411,7 +411,7 @@ function pointer(type: string, clientX: number, clientY: number): Event {
   return event;
 }
 
-describe('m3-t1/AC-6: デモの DOM 結線（jsdom / stub engine 注入）', () => {
+describe('デモの DOM 結線（jsdom / stub engine 注入）', () => {
   beforeEach(() => {
     mountPage();
   });
@@ -423,7 +423,7 @@ describe('m3-t1/AC-6: デモの DOM 結線（jsdom / stub engine 注入）', () 
 
     const state = demo.getState();
     // **getContext を stub していない**ことの明示 assert。両方 false でなければ
-    // (f) は検査されていない（設計 §5.4(1) / K21）。
+    // (f) は検査されていない。
     expect(state.hasContext).toEqual({ geo: false, pixel: false });
     expect(state.ready).toBe(true);
     expect(demo.getRecalcCount()).toBe(1);
@@ -432,7 +432,7 @@ describe('m3-t1/AC-6: デモの DOM 結線（jsdom / stub engine 注入）', () 
   });
 
   /**
-   * 回帰テスト（m3-t1/AC-16 の実ブラウザ観測で発見した欠陥）。
+   * 回帰テスト（実ブラウザ観測で発見した欠陥）。
    *
    * 実装は world file の 6 係数を ESRI の行名（A/D/B/E/C/F）で読み出していたが、
    * `@c4h/daedalus` の `WorldFile` の実キーは

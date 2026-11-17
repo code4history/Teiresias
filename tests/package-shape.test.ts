@@ -1,14 +1,14 @@
 /**
- * package 形状と依存境界の機械検証（m1-t1 設計 §8）。
+ * package 形状と依存境界の機械検証。
  *
- * - AC-m1-1: `@c4h/daedalus` が npm の初版の範囲の runtime dependency で、Atlas は
+ * - `@c4h/daedalus` が npm の初版の範囲の runtime dependency で、Atlas は
  *   runtime dependency でなく、`exports` は public root のみ。公開の設定（`private: false` 等）。
  *   兄弟の `link:` は `ci/pnpm-workspace.ci.yaml` の overrides だけに置く。
- * - AC-T2: Teiresias の `src` / `tests` 全域に Daedalus testkit / dist への禁止 import が 0 件。
- *   **手動 grep ではなく fs 全域走査 assert として結線する**（`outer rule-0012` の趣旨。
- *   設計レビュー第1ラウンド MIN-3）。
- * - AC-SCAFFOLD: scripts の結線、`vitest` と `@vitest/coverage-v8` の major 一致
- *   （`outer rule-0018`）、build 成果物に tests/fixtures が出ないこと。
+ * - Teiresias の `src` / `tests` 全域に Daedalus testkit / dist への禁止 import が 0 件。
+ *   **手動 grep ではなく fs 全域走査 assert として結線する**（検査は書いた同一変更で
+ *   scripts へ結線する、という規律の趣旨）。
+ * - scripts の結線、`vitest` と `@vitest/coverage-v8` の major 一致、
+ *   build 成果物に tests/fixtures が出ないこと。
  */
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, realpathSync, statSync } from 'node:fs';
@@ -133,7 +133,7 @@ function readOverrides(yaml: string): Record<string, string> {
   return overrides;
 }
 
-describe('AC-m1-1: runtime dependency と公開 surface', () => {
+describe('runtime dependency と公開 surface', () => {
   it('@c4h/daedalus は npm の初版の範囲で、依存の欄に link: / file: / workspace: が無い', () => {
     expect(packageJson.dependencies['@c4h/daedalus']).toMatch(FIRST_RELEASE_RANGE);
     const specs = [
@@ -159,12 +159,12 @@ describe('AC-m1-1: runtime dependency と公開 surface', () => {
   });
 
   /**
-   * m2a-t1/AC-8（設計 v1.5 §5.4 発火 1。`outer rule-0015`）。
+   * Atlas は devDependencies にだけ置く（契約変更は依存 spec を同一変更で追随させる）。
    *
-   * m1-t1 の実装は `dependencies` と `devDependencies` の**両方**から Atlas を禁じていたが、
+   * 以前の実装は `dependencies` と `devDependencies` の**両方**から Atlas を禁じていたが、
    * 守るべき不変条件は「Teiresias の**実行時**に engine が入らないこと」【C7】である。
    * 全面禁止はその十分条件でありながら**テストからの engine 注入も不可能にし**、仕様正本
-   * `AC-m2a-2`（実 engine E2E）と正面から矛盾する。m1-t1/AC-m1-1 の文言自体が
+   * （実 engine E2E）と正面から矛盾する。runtime dependency の条件の文言自体が
    * 「型だけの Atlas import と区別される」と型専用参照の存在を前提にしている。
    *
    * ∴ 緩めるのではなく**本来の不変条件へ置き換える**: (a) `dependencies` が 1 件であること、
@@ -184,7 +184,7 @@ describe('AC-m1-1: runtime dependency と公開 surface', () => {
 
   it('Teiresias src は Atlas を一切参照しない（fs 全域走査。C7 engine 直参照禁止）', () => {
     // needle は断片から組み立てる（本ファイルは tests/ 配下だが、走査範囲は src/ のみ ∴
-    // 自己検出はしない。それでも m1-t1 の FORBIDDEN_NEEDLES と同じ配慮を残す）。
+    // 自己検出はしない。それでも以前の FORBIDDEN_NEEDLES と同じ配慮を残す）。
     // **走査範囲を tests/ へ広げてはならない** — 新 E2E 自身が必ずヒットする。
     const needle = `@c4h/${'atlas'}`;
     const scanned = listFilesRecursively(join(packageRoot, 'src'));
@@ -289,7 +289,7 @@ describe('overrides の読み取り', () => {
   });
 });
 
-describe('AC-T2: Daedalus testkit / dist への禁止 import が 0 件', () => {
+describe('Daedalus testkit / dist への禁止 import が 0 件', () => {
   it('src と tests の全ファイルに 3 needle が現れない（fs 全域走査）', () => {
     const scanned = [
       ...listFilesRecursively(join(packageRoot, 'src')),
@@ -316,7 +316,7 @@ describe('AC-T2: Daedalus testkit / dist への禁止 import が 0 件', () => {
   });
 });
 
-describe('AC-SCAFFOLD: scaffolding の結線', () => {
+describe('scaffolding の結線', () => {
   it('検証 script が 6 本すべて結線されている', () => {
     expect(packageJson.scripts).toMatchObject({
       build: 'tsc',
@@ -325,20 +325,20 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
       'test:watch': 'vitest',
       coverage: 'vitest run --coverage',
     });
-    // test:types は tests/api-smoke.test.ts を tsc CLI の明示対象にする（設計 §3.4）
+    // test:types は tests/api-smoke.test.ts を tsc CLI の明示対象にする
     expect(packageJson.scripts['test:types']).toContain('--noEmit');
     expect(packageJson.scripts['test:types']).toContain('tests/api-smoke.test.ts');
   });
 
   /**
-   * m3-t1/AC-8（設計 v1.3 §6.1 / §2 #17）。
+   * デモの script の結線。
    *
    * デモのビルド経路（`dev` / `build:demo` / `verify:demo` / `verify:demo-bundle`）と
-   * 観測経路（`preview` = m3-t1/AC-16 の起動経路）を **5 キー**として機械固定する。
+   * 観測経路（`preview` = 実ブラウザでの観測の起動経路）を **5 キー**として機械固定する。
    * `toMatchObject` はキー追加では壊れない ∴ 追加した側を明示 assert する
-   * （`outer rule-0012` の趣旨。結線の存在を検査から辿れるようにする）。
+   * （検査は書いた同一変更で scripts へ結線する、という規律の趣旨。結線の存在を検査から辿れるようにする）。
    */
-  it('デモの build / verify / preview script が 5 キー結線されている（m3-t1/AC-8）', () => {
+  it('デモの build / verify / preview script が 5 キー結線されている', () => {
     expect(packageJson.scripts).toMatchObject({
       dev: 'vite --host',
       'build:demo': 'vite build',
@@ -350,11 +350,11 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
   });
 
   /**
-   * m3-t1/AC-8。デモのビルド・検証に必要な 3 件は **devDependencies にだけ**入れる。
+   * デモのビルド・検証に必要な 3 件は **devDependencies にだけ**入れる。
    * `proj-wasm` を `dependencies` へ入れると Teiresias の公開 package が engine に
-   * 依存することになり【C7】が package の形として破れる（設計 §6.1）。
+   * 依存することになり【C7】が package の形として破れる。
    */
-  it('デモ用 devDependencies 3 件が入り、dependencies は増えていない（m3-t1/AC-8）', () => {
+  it('デモ用 devDependencies 3 件が入り、dependencies は増えていない', () => {
     expect(packageJson.devDependencies.vite).toBeTypeOf('string');
     expect(packageJson.devDependencies['proj-wasm']).toBeTypeOf('string');
     expect(packageJson.devDependencies.jsdom).toBeTypeOf('string');
@@ -363,14 +363,14 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
   });
 
   /**
-   * m2a-t1: Atlas 型契約（AC-1(a)）の検査経路を結線する（`outer rule-0012`）。
+   * Atlas 型契約の検査経路を結線する（検査は書いた同一変更で scripts へ結線する）。
    *
    * `test:types` は `moduleResolution NodeNext` であり、Atlas の `dist/*.d.ts` が相対 import を
    * 拡張子なしで出力している（NodeNext では TS2834）ため `--skipLibCheck` と相まって
-   * `ProjectedCrsInfo` が `any` へ縮退する ∴ その経路だけでは AC-1(a) が vacuous になる。
+   * `ProjectedCrsInfo` が `any` へ縮退する ∴ その経路だけでは型契約の検査が vacuous になる。
    * `moduleResolution Bundler` の第 2 経路を別 script として足す（`&&` で連ねない）。
    */
-  it('Atlas 型契約の検査 script が結線されている（m2a-t1/AC-1a）', () => {
+  it('Atlas 型契約の検査 script が結線されている', () => {
     const script = packageJson.scripts['test:types:atlas'];
     expect(script).toBeTypeOf('string');
     expect(script).toContain('--noEmit');
@@ -380,13 +380,13 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
     expect(script).toContain('tests/atlas-adapter-contract.test.ts');
   });
 
-  it('vitest と @vitest/coverage-v8 の major が一致する（outer rule-0018）', () => {
+  it('vitest と @vitest/coverage-v8 の major が一致する', () => {
     expect(majorOf(packageJson.devDependencies['@vitest/coverage-v8'])).toBe(
       majorOf(packageJson.devDependencies.vitest),
     );
   });
 
-  it('devDependencies は入っている Daedalus と同じ major に揃っている（設計 K13）', () => {
+  it('devDependencies は入っている Daedalus と同じ major に揃っている', () => {
     // 兄弟の checkout ではなく node_modules の実体を読む。読めなければ赤（skip しない）。
     const daedalusPackageJson = installedPackageJson('@c4h/daedalus') as {
       devDependencies: Record<string, string>;
@@ -410,15 +410,15 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
   it('build 成果物 dist に tests / fixtures / testkit / demo が存在しない', () => {
     const distDir = join(packageRoot, 'dist');
     if (!existsSync(distDir) || !statSync(distDir).isDirectory()) {
-      // build 前に test を走らせた場合。§8.1 の順序では build 後にもう一度 test を回し、
-      // その実行で本 assert が実際に発火する（task-state に両実行を記録する）。
+      // build 前に test を走らせた場合。build 後にもう一度 test を回し、
+      // その実行で本 assert が実際に発火する。
       expect(tsconfigJson.include).toEqual(['src/**/*']);
       return;
     }
     const distFiles = listFilesRecursively(distDir).map((file) => relative(distDir, file));
     expect(distFiles.length).toBeGreaterThan(0);
     expect(
-      // m3-t1/AC-8（設計 §4.4）: `demo` を needle へ追加する。`demo/` は `@c4h/atlas` を
+      // `demo` を needle へ追加する。`demo/` は `@c4h/atlas` を
       // import する ∴ dist へ混入すると【C7】（Teiresias が engine を直参照しない）が
       // 公開 package の形として破れる。tsconfig の `include: ["src/**/*"]` により構造上
       // 入らないが、**入らないことを機械で固定する**（被影響への追随ではなく追加である）。
@@ -431,9 +431,9 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
       .split('\n')
       .map((line) => line.trim())
       .filter((line) => line !== '');
-    // m2a-t1: MIN-IR-3（m1-t1 からの持ち越し）で `coverage/` を追加した。
-    // m3-t1: デモの生成物 `dist-demo/` と作業領域 `.tmp/` を追加した（設計 §2 #18。
-    // `outer rule-0015` — 期待値を無効化する変更は同じ変更で spec を追随させる）。
+    // `coverage/` を追加した。
+    // デモの生成物 `dist-demo/` と作業領域 `.tmp/` を追加した（
+    // 期待値を無効化する変更は同じ変更で spec を追随させる）。
     // 完全一致 assert のまま追随させる（順不同集合へ緩めない。生成物除外の全数固定を保つ）。
     expect(ignored).toEqual([
       'node_modules/',
@@ -446,10 +446,10 @@ describe('AC-SCAFFOLD: scaffolding の結線', () => {
   });
 });
 
-describe('AC-T1 (b): fixture コピーの SHA-256 が規定の値と一致する（Daedalus 側は Daedalus の tests/mock-contract-sha.test.ts）', () => {
+describe('fixture コピーの SHA-256 が規定の値と一致する（Daedalus 側は Daedalus の tests/mock-contract-sha.test.ts）', () => {
   /** 契約文書が定める fixture の実測 SHA-256（fixtureVersion 1.0.1）。 */
   const SPECIFIED_SHA256 =
-    '5da3d253e46a0dc6f8710432fc0783a261fbb35ca0c47757b0b204a48fa85495';
+    'aea661042f0817cdb594a067da9d6d45ff29431c09e41d65a0bea54df14fe44e';
   const copyTarget = join(packageRoot, 'tests', 'fixtures', 'mockContractFixture.ts');
 
   it('コピーが規定 SHA と一致する（コピー元は Daedalus の側が同じ定数で検査する）', () => {

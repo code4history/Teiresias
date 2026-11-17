@@ -1,12 +1,12 @@
 /**
- * デモ配備の静的検査（m3-t1 設計 v1.3 §6.7(a) / m3-t1/AC-7 / m3-t1/AC-12）。
+ * デモ配備の静的検査。
  *
  * `Atlas/tests/publish-and-demo.test.ts`（125 行 / 8 個の `it`）の**適応**である。
- * 適応差分の正本は設計 §6.7(a) の表であり、要点だけ再掲する:
+ * 適応差分の要点:
  *
  * - Atlas の `it` #1（npm metadata / publish scripts）と #2（bilingual README）は**落とす**
- *   （前者のキーは m3-t2 の所有 ∴ m3-t1 時点では必ず RED になる。`prepublishOnly` は
- *   `HR-m3-005`〔publish なし〕により恒久的に存在しない。後者は `README.ja.md` が無い）。
+ *   （前者のキーはこのリポジトリでは使わない。`prepublishOnly` は
+ *   publish しない方針により恒久的に存在しない。後者は `README.ja.md` が無かった）。
  *   `scripts` / `devDependencies` の assert は `package-shape.test.ts` が持つ ∴ 二重定義しない。
  * - Atlas の #4 は対象ファイルを `demo/atlas-engine.js` へ差し替える（§5.4 のモジュール分割）。
  * - `benchmark.html` / `option value="japan" selected` の否定 assert は Atlas 固有 ∴ 落とす。
@@ -14,12 +14,12 @@
  *   `verify-demo-browser-bundle.mjs` を読む形へ置き換える（`npm pack` 経路を持たないため）。
  *
  * **新規 2 項目**（Atlas に対応物なし）:
- * - m3-t1/AC-7 の一部: `demo/*.js` に HTML sink が 0 件であること（K20）
- * - m3-t1/AC-12: ワークフローの静的検査（needle ↔ ファイル対応表は設計 §9.1a）
+ * - `demo/*.js` に HTML sink が 0 件であること
+ * - ワークフローの静的検査
  *
  * ⚠️ **Atlas `deploy.yml` の `master` 化はここでは検査しない。**
  * 3 repo を分離した後に相対パス参照が解決不能になるため、Atlas 内で閉じる検査として
- * `Atlas/tests/publish-and-demo.test.ts` 側へ置いた（設計 §6.7(b) / K22）。
+ * `Atlas/tests/publish-and-demo.test.ts` 側へ置いた。
  */
 import { access, readFile } from 'node:fs/promises';
 import { readdirSync } from 'node:fs';
@@ -105,8 +105,8 @@ describe('publish and demo packaging', () => {
     expect(demoPage).not.toContain('Cross-Origin-Embedder-Policy');
   });
 
-  it('adds no new c4h-* shell classes of its own (m3-t1/AC-7)', async () => {
-    // シェルの規約は Atlas 所有 ∴ Teiresias は拡張しない（K17）。
+  it('adds no new c4h-* shell classes of its own', async () => {
+    // シェルの規約は Atlas 所有 ∴ Teiresias は拡張しない。
     const style = await readText('demo', 'style.css');
     expect(style).not.toContain('c4h-');
     // デモ固有の見た目は接頭辞つきで置かれている（検査が vacuous でないことの確認）
@@ -119,10 +119,10 @@ describe('publish and demo packaging', () => {
     expect(style).toMatch(/\.teiresias-flow\s*,\s*\.teiresias-top-rms\s*\{/);
   });
 
-  it('never uses HTML string sinks in demo scripts (m3-t1/AC-7 / K20)', async () => {
-    // outer の sink 走査（scripts/m1-t4/verify-html-sinks.mjs）は Teiresias を含まず、
+  it('never uses HTML string sinks in demo scripts', async () => {
+    // 親の作業場所の sink 走査は Teiresias を含まず、
     // 走査サブディレクトリにも demo が無い ∴ **二重に届かない**。走査で守れない分を
-    // 構成で守る（設計 §5.4(2)）。ここが唯一の防壁である。
+    // 構成で守る。ここが唯一の防壁である。
     const demoDir = join(packageRoot, 'demo');
     const scripts = readdirSync(demoDir).filter((name) => name.endsWith('.js')).sort();
     expect(scripts).toEqual(['atlas-engine.js', 'estimate-scene.js', 'main.js', 'presets.js', 'scenes.js']);
@@ -184,7 +184,7 @@ describe('publish and demo packaging', () => {
     expect(script).toContain('origin-rooted /assets/');
     expect(script).toContain('unexpectedly small');
 
-    // Atlas の packedScript 4 行の置き換え（npm pack 経路を持たないため。設計 §6.7(a) #8）
+    // Atlas の packedScript 4 行の置き換え（npm pack 経路を持たないため）
     expect(bundleScript).toContain('affineSkippedCollinear');
     expect(bundleScript).toContain('自己検証');
     expect(bundleScript).toContain('__vite-browser-external');
@@ -197,16 +197,16 @@ describe('publish and demo packaging', () => {
 });
 
 /**
- * m3-t1/AC-12: ワークフローの静的検査。
+ * ワークフローの静的検査。
  *
- * **needle ↔ ファイル対応表の正本は設計 §9.1a である。** 検査はすべて
+ * 検査はすべて
  * 「ファイルを文字列として読み `toContain` / `not.toContain` する」形に限る
  * （Node に YAML パーサは無く、`js-yaml` を入れない方針である）。
  *
- * ⚠️ `outer rule-0014`: リポジトリが GitHub 上に存在しない ∴ **これは CI の検証ではない。**
- * 「静的に妥当な yml を置いた」までしか主張しない。初回実行の観測は m3-t2 の責務である。
+ * ⚠️ 「手元で動いた」は CI の検証にならない ∴ **これは CI の検証ではない。**
+ * 「静的に妥当な yml を置いた」までしか主張しない。初回実行の観測は CI の側で行う。
  */
-describe('m3-t1/AC-12: ワークフローの静的検査（CI の検証ではない）', () => {
+describe('ワークフローの静的検査（CI の検証ではない）', () => {
   it('Teiresias deploy.yml が master 起動・兄弟 checkout・Pages 配備を満たす', async () => {
     const deploy = await readText('.github', 'workflows', 'deploy.yml');
     for (const needle of [
@@ -279,7 +279,7 @@ describe('m3-t1/AC-12: ワークフローの静的検査（CI の検証ではな
     ]) {
       expect(ci).toContain(needle);
     }
-    // 本ファイルはブランチ非限定である（設計 §6.5。Atlas 前例と同一）
+    // 本ファイルはブランチ非限定である（Atlas 前例と同一）
     expect(ci).not.toContain('branches:');
     // 兄弟の ref は固定せず、select-sibling-ref.mjs が選ぶ
     expect(ci).not.toContain('ref: master');
@@ -288,12 +288,12 @@ describe('m3-t1/AC-12: ワークフローの静的検査（CI の検証ではな
 });
 
 /**
- * m3-t2/K13（ADR-0013: 公開 README は英語正・日本語ミラーの 2 本体制）と
- * m3-t2/K12（README のライセンス表記を実ライセンスに合わせる）を **repo 内で閉じる形**で固定する。
- * outer の `scripts/m2b-t1/verify-crs-docs.mjs` は private な monorepo の中にしかない ∴
- * 分離後の公開リポジトリ単体でも走る検査をここへ置く（設計 §4.4.4 の検査置き場所の表）。
+ * 公開 README は英語正・日本語ミラーの 2 本体制であることと
+ * README のライセンス表記が実ライセンスに合うことを **repo 内で閉じる形**で固定する。
+ * 親の作業場所の文書検査は private な monorepo の中にしかない ∴
+ * 分離後の公開リポジトリ単体でも走る検査をここへ置く。
  */
-describe('README 体制と license 表記（m3-t2）', () => {
+describe('README 体制と license 表記', () => {
   it('英日 2 本の README が実在し、相互の言語切替リンクを持つ', async () => {
     await access(join(packageRoot, 'README.md'));
     await access(join(packageRoot, 'README.ja.md'));
@@ -312,10 +312,10 @@ describe('README 体制と license 表記（m3-t2）', () => {
     expect(packageJson.license).toBe('MIT');
     expect(license).toContain('MIT License');
 
-    // ⚠️ 禁止語をソースへ**逐語で置かない**（連結して組み立てる）。m3-t2/AC-6 は「3 repo 全域で
+    // ⚠️ 禁止語をソースへ**逐語で置かない**（連結して組み立てる）。公開リポジトリの文書検査は「3 repo 全域で
     // 当該語が 0 件」を走査で固定する ∴ 検査の実装元が自分でヒットすると、走査は「検査が存在すること」を
     // 欠陥として数えてしまう。ファイルごと走査から除外するより、実装元だけを走査面から外すこの形の方が、
-    // 同ファイルの他の行に対する走査を弱めない（nayuta-implementer H-9）。
+    // 同ファイルの他の行に対する走査を弱めない（実装元は除外し、実装元の側で規律を強制する）。
     const forbiddenLicenseNames = ['maplat ' + 'limited', 'limited ' + 'license'];
 
     for (const name of ['README.md', 'README.ja.md']) {
