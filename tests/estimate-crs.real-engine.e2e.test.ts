@@ -104,7 +104,7 @@ function pickById(rows: readonly ProjectedCrsInfo[], ids: readonly string[]): Pr
 
 /*
  * adapter glue は Atlas の公開 adapter `createCandidateTransformer` を使う。Teiresias `src` には
- * 置かず、テストが注入するだけである（【C7】engine 直参照禁止）。
+ * 置かず、テストが注入するだけである（Teiresias は engine を直接参照しない）。
  *
  * 挙動: `geoBasis` が `lonlat_deg` / lon-lat 順でなければ `null`（黙って誤変換せず、契約 (7)
  * 「業務的変換不能」へ落とす）、知らない id は `null`、それ以外は
