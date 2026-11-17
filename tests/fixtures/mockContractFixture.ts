@@ -17,7 +17,7 @@
  */
 
 /** fixture の版。改訂時に上げる（契約文書に記載された版と一致すること）。 */
-export const fixtureVersion = '1.0.1';
+export const fixtureVersion = '1.0.2';
 
 /** mock が対応する唯一の geoBasis（lonlat_deg / lon-lat 順）。 */
 export const geoBasisLonLat = { kind: 'lonlat_deg', axisOrder: 'lon-lat' } as const;

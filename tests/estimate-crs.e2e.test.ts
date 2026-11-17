@@ -2,8 +2,8 @@
  * Teiresias 所有 deterministic mock の 2 候補 E2E。
  *
  * node 環境で package 境界（Teiresias -> `@c4h/daedalus`）、adapter、候補 loop、実数 ranking を
- * 一体で検証する。deterministic mock E2E は実 engine E2E を代替しない（Atlas 実 engine 注入は
- * m2a、browser runtime は m2b の既知欠落）。
+ * 一体で検証する。deterministic mock E2E は実 engine E2E を代替しない（Atlas の実 engine を注入した
+ * E2E は `estimate-crs.real-engine.e2e.test.ts` が持つ。browser runtime での実行はどちらも確かめない）。
  */
 import { fitWorldFile } from '@c4h/daedalus';
 import { describe, expect, it } from 'vitest';
@@ -128,7 +128,7 @@ describe('2 候補 E2E（Teiresias 所有 GCP セット）', () => {
     expect(result.ranked[1].rmsMeters).toBeGreaterThan(result.ranked[0].rmsMeters);
   });
 
-  it('selected.worldFile は Daedalus の最終返却で、ranked の rmsMeters は basic RMS である（§5.2 の区別）', async () => {
+  it('selected.worldFile は Daedalus の最終返却で、ranked の rmsMeters は basic RMS である', async () => {
     const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
       transformer: mockTransformer,
       topK: 2,

@@ -1,5 +1,5 @@
 /**
- * `CandidateTransformer` 契約の **Teiresias 側実装**（Mock 二層所有の消費側。契約文書 §5）。
+ * `CandidateTransformer` 契約の **Teiresias 側実装**（Mock 二層所有の消費側）。
  *
  * 【二層所有】
  * 契約定義・参照実装・fixture の正本は Daedalus 側 testkit にある。Teiresias はそれを
@@ -7,7 +7,7 @@
  * 数値正本である fixture だけを `mockContractFixture.ts` へ**ファイルコピー**して持ち込み
  * （SHA-256 で同一性を機械照合する）、判定分岐は本ファイルが Teiresias 所有として再実装する。
  *
- * 【判定順序】（契約文書 §2.1。上から評価し最初に該当した分岐で確定する）
+ * 【判定順序】（上から評価し最初に該当した分岐で確定する）
  *  1. `points.length === 0`                       -> null   契約(4)
  *  2. geoBasis が lonlat_deg / lon-lat でない     -> null   契約(7)
  *  3. id がカタログに無い（書式不正を含む）       -> null   契約(7)
@@ -168,7 +168,7 @@ export const conformingTransformers: ReadonlyArray<CandidateTransformer> = [
  *   pixel (u,v) -> lon = 135 + u*0.0078125, lat = 35 + v*0.0078125
  * 期待（PLANE-A・basic similarity で厳密適合）:
  *   xScale=869.6875, xSkew=0, xOrigin=0, ySkew=0, yScale=869.6875, yOrigin=0
- * オフセットは fixture §4.1 と同じく 2 の冪の分数（2⁻⁷ の倍数）に限定してあり、期待値は厳密である。
+ * オフセットは `mockContractFixture.ts` と同じく 2 の冪の分数（2⁻⁷ の倍数）に限定してあり、期待値は厳密である。
  */
 export const teiresiasE2eGcps: ReadonlyArray<GcpPair> = [
   { pixel: [0, 0], geo: [135.0, 35.0] },

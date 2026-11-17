@@ -79,8 +79,8 @@ function expectPointsClose(
 }
 
 describe('Teiresias 所有 mock が fixture の期待値に一致する', () => {
-  it('fixture の版が契約文書の 1.0.1 である', () => {
-    expect(fixtureVersion).toBe('1.0.1');
+  it('fixture の版が 1.0.2 である', () => {
+    expect(fixtureVersion).toBe('1.0.2');
     expect(candidateIds).toEqual([planeAId, planeBId]);
     expect(candidateDefinitions.map((d) => d.id)).toEqual([planeAId, planeBId]);
   });
@@ -169,7 +169,7 @@ describe('CandidateTransformer 8 項目契約（Teiresias 側実装）', () => {
   });
 });
 
-describe('違反シミュレータの全入力域挙動（契約文書 §3）', () => {
+describe('違反シミュレータの全入力域挙動', () => {
   it('throwing は入力によらず常に throw する（null 系入力を含む）', () => {
     expect(() => throwingMockTransformer(planeAId, contractPoints, lonlat)).toThrow(
       /always throws/,
@@ -552,7 +552,7 @@ describe('不変条件: warnings の帰属', () => {
   });
 });
 
-describe('内部 helper の単体検証（公開 API から到達不能な分岐。K14 / K16 / INF-5）', () => {
+describe('内部 helper の単体検証（公開 API から到達不能な分岐）', () => {
   it('deriveSuccessStatus: 合成 warning 配列で ok / ok_with_warnings を導出する', () => {
     expect(deriveSuccessStatus([])).toBe('ok');
     expect(deriveSuccessStatus([{ code: 'validationSkipped' }])).toBe('ok_with_warnings');

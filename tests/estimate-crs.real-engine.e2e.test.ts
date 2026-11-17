@@ -13,7 +13,7 @@
  * 発見の可視化である**（`estimate-crs.e2e.test.ts` の前例に踏襲）。
  * 反射時の挙動はここでは変えない — 判定結果は ranking にも実 engine E2E にも影響させない。
  *
- * 反射判定 helper（§5.6）は**本ファイル内にだけ**置き、`export` しない。製品コード
+ * 反射判定 helper は**本ファイル内にだけ**置き、`export` しない。製品コード
  * （`Atlas/src` / `Teiresias/src` / `Daedalus`）へは置かない（置いた時点で
  * 「反射をどう扱うか」をここで決めたことになり、後続の設計の所有事項を侵す）。
  */
@@ -283,7 +283,7 @@ function judgeReflection(
 // 数値 assert の共通 helper
 // ---------------------------------------------------------------------------
 
-/** 相対 tolerance での一致（tolerance は §3.5.4 の行ごとに違う ∴ 呼出側が必ず渡す）。 */
+/** 相対 tolerance での一致（tolerance は下の表の行ごとに違う ∴ 呼出側が必ず渡す）。 */
 function expectRelativeClose(actual: number, expected: number, relativeTolerance: number): void {
   expect(Number.isFinite(actual)).toBe(true);
   expect(Math.abs(actual - expected) / Math.abs(expected)).toBeLessThan(relativeTolerance);
@@ -590,13 +590,13 @@ describe('相対順位の実測固定・正規化なし（direct-only） — 反
 describe('反射判定の実測固定・正規化なし（direct-only） — 符号付き面積・部分集合多数決による反射判定', () => {
   /**
    * 判定結果は診断値であり、ranking にも実 engine E2E にも影響させない。
-   * 反射時の挙動を決めるのは m2b である。
+   * 反射時の挙動はここでは決めない（後の設計で決める）。
    *
-   * #18（§3.5.4）: `reflect` / `forward` / `degenerate` の内訳は離散量であり、
+   * #18: `reflect` / `forward` / `degenerate` の内訳は離散量であり、
    *   変動源 1・2 とも `0`（面積の符号は `min|area2|` に対し摂動の寄与が `1e-9` 相対、
    *   縮退判定は `min(λ2/λ1)` が閾値 `0.01` から両側 1.34 桁以上離れている）
    *   ∴ **完全一致 assert**（tolerance を置かない）。上限余裕 7 桁。
-   * #19（§3.5.4）: `disagreementRatio` は #18 の内訳から決まる有理数 ∴ 完全一致。
+   * #19: `disagreementRatio` は #18 の内訳から決まる有理数 ∴ 完全一致。
    */
   async function reportsFor(reflectedSet: boolean): Promise<Map<string, ReflectionReport>> {
     const candidates = pickById(await catalogWide(), REQUIRED_IDS);
@@ -672,16 +672,16 @@ describe('反射判定の実測固定・正規化なし（direct-only） — 符
 
 describe('縮退クラスの実測固定 — PROJ-5 文字列が同一へ潰れる authority エントリ集合', () => {
   /**
-   * #13（§3.5.4）: `EPSG:30166` との最大差 `13.639282286267992` m
+   * #13: `EPSG:30166` との最大差 `13.639282286267992` m
    *   変動源 1 `0`（最小二乗を通らない差分）/ 変動源 2 `1.8582e-7` 相対（絶対 `2.5344e-6` m）
    *   必要 `1.9e-7` / 採用 **`1e-4` 相対** / 下限余裕 **2.73 桁**
    *   上限余裕 大（対立仮説は `0` m）∴ 完全一致 assert は偽 RED になる。
    *
-   * #14（§3.5.4）: 縮退クラス内最大差 `0` m
+   * #14: 縮退クラス内最大差 `0` m
    *   採用 **`toBe(0)`**（tolerance を置かない）。独立摂動の保守モデルでは `2.8284e-6` m
    *   動きうるが、同クラスの 3 者は `proj4` 文字列が**完全同一**である ∴
    *   `transformLonLatArrayToProjected` が同一引数で同一の純関数を呼び、差はどのビルドでも
-   *   構造的に厳密 `0` である（§3.5.4 の脚注 †。相関が構造から言える唯一の行）。
+   *   構造的に厳密 `0` である（相関が構造から言える唯一の行）。
    */
   const DIFF_TO_30166_METERS = 13.639282286267992; // #13
   const DEGENERATE_DIFF_RELATIVE_TOLERANCE = 1e-4; // #13

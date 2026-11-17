@@ -447,16 +447,16 @@ describe('scaffolding の結線', () => {
 });
 
 describe('fixture コピーの SHA-256 が規定の値と一致する（Daedalus 側は Daedalus の tests/mock-contract-sha.test.ts）', () => {
-  /** 契約文書が定める fixture の実測 SHA-256（fixtureVersion 1.0.1）。 */
+  /** fixture の実測 SHA-256（fixtureVersion 1.0.2。Daedalus の正本と同じ値）。 */
   const SPECIFIED_SHA256 =
-    'aea661042f0817cdb594a067da9d6d45ff29431c09e41d65a0bea54df14fe44e';
+    'ceea43136ab476c8165bb1fd7db6764232815c6871969b67adec3cf8fd2a69cc';
   const copyTarget = join(packageRoot, 'tests', 'fixtures', 'mockContractFixture.ts');
 
   it('コピーが規定 SHA と一致する（コピー元は Daedalus の側が同じ定数で検査する）', () => {
     expect(sha256OfFile(copyTarget)).toBe(SPECIFIED_SHA256);
   });
 
-  it('コピー先は import を一切持たない純定数ファイルである（契約文書 §5.2）', () => {
+  it('コピー先は import を一切持たない純定数ファイルである', () => {
     const lines = readFileSync(copyTarget, 'utf8').split('\n');
     expect(lines.filter((line) => /^\s*import\b/.test(line))).toEqual([]);
   });

@@ -5,13 +5,15 @@
  * 適応差分の要点:
  *
  * - Atlas の `it` #1（npm metadata / publish scripts）と #2（bilingual README）は**落とす**
- *   （前者のキーはこのリポジトリでは使わない。`prepublishOnly` は
- *   publish しない方針により恒久的に存在しない。後者は `README.ja.md` が無かった）。
- *   `scripts` / `devDependencies` の assert は `package-shape.test.ts` が持つ ∴ 二重定義しない。
- * - Atlas の #4 は対象ファイルを `demo/atlas-engine.js` へ差し替える（§5.4 のモジュール分割）。
+ *   （初期の版では publish しない方針で、`README.ja.md` も無かったため、どちらも取り込まなかった。
+ *   今は publish する。公開の設定（`private: false`・`publishConfig.access`・`files`）と
+ *   `scripts` / `devDependencies` の assert は `package-shape.test.ts` が、英日 2 本の README は
+ *   本ファイル末尾の「README 体制と license 表記」が持つ ∴ ここでは二重定義しない）。
+ * - Atlas の #4 は対象ファイルを `demo/atlas-engine.js` へ差し替える（engine と DOM 結線層を分けたモジュール分割）。
  * - `benchmark.html` / `option value="japan" selected` の否定 assert は Atlas 固有 ∴ 落とす。
  * - `packedScript`（`verify-packed-browser-runtime.mjs`）の 4 行は落とし、
- *   `verify-demo-browser-bundle.mjs` を読む形へ置き換える（`npm pack` 経路を持たないため）。
+ *   `verify-demo-browser-bundle.mjs` を読む形へ置き換える（初期の版では publish しない方針だったため、
+ *   npm pack の経路を持たない形にした。この検査が見るのは demo のバンドルで、公開する tarball ではない）。
  *
  * **新規 2 項目**（Atlas に対応物なし）:
  * - `demo/*.js` に HTML sink が 0 件であること
@@ -53,7 +55,7 @@ describe('publish and demo packaging', () => {
     expect(engineJs).toContain('projWasmAssetBaseUrl');
     expect(engineJs).toContain("new URL('assets/', pageRoot)");
 
-    // §5.4 のモジュール分割が守られていること: DOM 結線層は engine を直接触らない。
+    // モジュール分割（engine と DOM 結線層を分ける）が守られていること: DOM 結線層は engine を直接触らない。
     // 禁じるのは package の import であり、フッタの版の表示で package の**名前**を文字列として
     // 出すことは「触る」に当たらない ∴ import の形だけを見る。
     expect(mainJs).not.toMatch(/from\s*['"]@c4h\/atlas['"]|import\s*\(\s*['"]@c4h\/atlas['"]/);
@@ -164,7 +166,7 @@ describe('publish and demo packaging', () => {
     expect(viteConfig).toContain('serve-proj-wasm-demo-assets');
     expect(viteConfig).toContain('alias-proj-wasm-browser-runtime');
     expect(viteConfig).toContain('PROJ_WASM_BROWSER_ID');
-    // K9: Atlas と名前空間を分ける
+    // Atlas と名前空間を分ける
     expect(viteConfig).toContain('__TEIRESIAS_PROJ_WASM_ASSET_BASE_URL__');
     expect(viteConfig).not.toContain('__ATLAS_PROJ_WASM_ASSET_BASE_URL__');
     // 規約 ∴ 緩めない（Atlas から 1 文字も変えていない 3 本）
@@ -184,7 +186,7 @@ describe('publish and demo packaging', () => {
     expect(script).toContain('origin-rooted /assets/');
     expect(script).toContain('unexpectedly small');
 
-    // Atlas の packedScript 4 行の置き換え（npm pack 経路を持たないため）
+    // Atlas の packedScript 4 行の置き換え（npm pack の経路を通さず demo のバンドルを見るため）
     expect(bundleScript).toContain('affineSkippedCollinear');
     expect(bundleScript).toContain('自己検証');
     expect(bundleScript).toContain('__vite-browser-external');

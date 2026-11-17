@@ -1,13 +1,14 @@
 /**
  * demo バンドルの browser 適合性を機械検証する。
  *
- * これは **C11（Daedalus の browser 動作）解消のうち「バンドル可能性」行**の裏づけである。
- * **`browser runtime での実行` 行の裏づけにはならない**（そちらは実ブラウザでの 1 回観測）。
+ * これは **Daedalus のブラウザでの動作のうち「バンドルできること」**の裏づけである。
+ * **「browser runtime で実行できること」の裏づけにはならない**（そちらは実ブラウザでの 1 回観測）。
  * 2 つの行を混ぜない。
  *
  * `Atlas/scripts/verify-packed-browser-runtime.mjs` の**軽量版**である
- * （Teiresias は publish しない ∴ `npm pack` 経路を
- * 通す意味が無く、demo build の出力チャンクを走査する形へ縮めた。
+ * （初期の版では Teiresias を publish しない方針だったため、`npm pack` の経路を持たない形にし、
+ * demo build の出力チャンクを走査する形へ縮めた。今は publish するが、この検査が確かめるのは
+ * demo のバンドルのブラウザ適合性であり、公開する tarball の中身ではない）。
  *
  * 検査は 4 つ:
  *   (1) `dist-demo/` が無ければ「先に build:demo を実行せよ」と言って exit 1（黙って成功しない）
@@ -143,7 +144,7 @@ if (daedalusChunks.length === 0) {
   violations += 1;
   fail(
     `Daedalus 由来コードの目印 ${JSON.stringify(DAEDALUS_MARKER)} がどのチャンクにも無い。` +
-      "バンドルに Daedalus が入っていない ∴ この検査は C11 の裏づけにならない。",
+      "バンドルに Daedalus が入っていない ∴ この検査は Daedalus をバンドルできることの裏づけにならない。",
   );
 }
 
