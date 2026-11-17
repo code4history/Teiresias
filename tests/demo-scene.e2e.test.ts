@@ -1,7 +1,7 @@
 /**
- * デモの**現象**を実 Atlas engine で固定する E2E（m3-t1 設計 v1.3 §9.1 / m3-t1/AC-5）。
+ * デモの**現象**を実 Atlas engine で固定する E2E。
  *
- * 対応 AC（設計 §9.1 の m3-t1/AC-5 の (a)〜(e)）:
+ * 確かめること（(a)〜(e)）:
  * - (a) 反射なしで真値 `EPSG:6674` が `ranked[0]`
  * - (b) 反射なしの `rms[2位]/rms[1位]` が `1e6` を超える
  * - (c) 反射ありで同比が `1.01` 未満に落ちる（= 識別力が潰れる）
@@ -94,7 +94,7 @@ async function scene({ mode, yFlip, chirality, mutate }: SceneInput) {
   });
 }
 
-describe('m3-t1/AC-5: デモの現象を実 Atlas engine で固定する', () => {
+describe('デモの現象を実 Atlas engine で固定する', () => {
   it('(a) 反射なしで真値 EPSG:6674 が ranked[0] である', async () => {
     const result = await scene({ mode: 'zones', yFlip: false });
     expect(result.ranked.length).toBeGreaterThanOrEqual(2);
@@ -175,7 +175,7 @@ describe('m3-t1/AC-5: デモの現象を実 Atlas engine で固定する', () =>
   });
 });
 
-describe('m3-t1/AC-5: discriminationOf の境界（純関数側）', () => {
+describe('discriminationOf の境界（純関数側）', () => {
   it('候補が 1 件以下なら ratio / collapsed は null（判定不能を偽で表さない）', () => {
     expect(discriminationOf([])).toMatchObject({ ratio: null, collapsed: null });
     expect(discriminationOf([{ rmsMeters: 1 }])).toMatchObject({ ratio: null, collapsed: null });

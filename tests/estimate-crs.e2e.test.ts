@@ -1,9 +1,9 @@
 /**
- * AC-m1-2: Teiresias 所有 deterministic mock の 2 候補 E2E（設計 §7.2 / §8.2）。
+ * Teiresias 所有 deterministic mock の 2 候補 E2E。
  *
  * node 環境で package 境界（Teiresias -> `@c4h/daedalus`）、adapter、候補 loop、実数 ranking を
- * 一体で検証する。deterministic mock E2E は実 engine E2E を代替しない（Atlas 実 engine 注入は
- * m2a、browser runtime は m2b の既知欠落）。
+ * 一体で検証する。deterministic mock E2E は実 engine E2E を代替しない（Atlas の実 engine を注入した
+ * E2E は `estimate-crs.real-engine.e2e.test.ts` が持つ。browser runtime での実行はどちらも確かめない）。
  */
 import { fitWorldFile } from '@c4h/daedalus';
 import { describe, expect, it } from 'vitest';
@@ -41,7 +41,7 @@ function expectWorldFileClose(actual: WorldFile, expected: Readonly<Record<strin
   }
 }
 
-describe('AC-m1-2: 2 候補 E2E（Teiresias 所有 GCP セット）', () => {
+describe('2 候補 E2E（Teiresias 所有 GCP セット）', () => {
   it('PLANE-A が ranked[0] かつ selected identity になり、WorldFile 6 値が 1e-9 以内で一致する', async () => {
     const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
       transformer: mockTransformer,
@@ -128,7 +128,7 @@ describe('AC-m1-2: 2 候補 E2E（Teiresias 所有 GCP セット）', () => {
     expect(result.ranked[1].rmsMeters).toBeGreaterThan(result.ranked[0].rmsMeters);
   });
 
-  it('selected.worldFile は Daedalus の最終返却で、ranked の rmsMeters は basic RMS である（§5.2 の区別）', async () => {
+  it('selected.worldFile は Daedalus の最終返却で、ranked の rmsMeters は basic RMS である', async () => {
     const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
       transformer: mockTransformer,
       topK: 2,
@@ -155,12 +155,12 @@ describe('実測固定・正規化なし（direct-only）: fixture の recommend
    * fixture の `recommendedE2eGcps` は pixel -> geo が**反射**（`lat = 35 - v*0.0078125`）を
    * 含む。Daedalus の basic（Helmert）similarity は `{xScale:a, xSkew:-b, ySkew:b, yScale:a}`
    * すなわち行列式 `a²+b² > 0` の回転+等方スケールのみを表現でき、**反射を表現できない**。
-   * ∴ fixture の doc comment が述べる「5 点・similarity 厳密適合」は、m0 で凍結された
+   * ∴ fixture の doc comment が述べる「5 点・similarity 厳密適合」は、現在の
    * Daedalus 実装に対しては成立しない（xScale=869.6875 かつ yScale=-869.6875 は
    * similarity 形では `a = 869.6875` かつ `a = -869.6875` を同時に要求する）。
    *
    * 本 describe は、その実測挙動をそのまま固定して**発見を可視化**するためのものであり、
-   * 期待する仕様を表明するものではない。設計 §7.2 の AC-m1-2 は
+   * 期待する仕様を表明するものではない。2 候補 E2E の期待は
    * `tests/fixtures/mockTransformer.ts` の `teiresiasE2eGcps`（反射なし）で満たしている。
    *
    * `estimateCrs` は既定で反射を吸収する（chirality 正規化）ため、ここでは
@@ -169,7 +169,7 @@ describe('実測固定・正規化なし（direct-only）: fixture の recommend
    */
   const recommended: ReadonlyArray<GcpPair> = recommendedE2eGcps;
 
-  it('basic score では PLANE-B が先着する（AC-m1-2 の期待と逆になる）', async () => {
+  it('basic score では PLANE-B が先着する（2 候補 E2E の期待と逆になる）', async () => {
     const result = await estimateCrs(recommended, [planeA, planeB], {
       transformer: mockTransformer,
       chirality: 'direct-only',

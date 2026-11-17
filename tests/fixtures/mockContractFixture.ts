@@ -2,22 +2,22 @@
  * CandidateTransformer 契約 fixture の正本（Daedalus testkit）。
  *
  * 【本ファイルの位置づけ】
- * - 契約文書: `docs/superpowers/specs/2026-08-28-mock-transformer-contract.md`（親リポジトリ）
- * - 本ファイルは **import を一切持たない純定数ファイル**である。Teiresias（m1-t1）は本ファイルを
- *   package 境界越し import せず、**ファイルコピー**して使う（Mock 二層所有。契約文書 §4）。
+ * - 契約文書: 親リポジトリの CandidateTransformer 契約の文書
+ * - 本ファイルは **import を一切持たない純定数ファイル**である。Teiresias は本ファイルを
+ *   package 境界越し import せず、**ファイルコピー**して使う（Mock 二層所有）。
  *   コピー 1 ファイルだけで mock を再実装できるよう、候補カタログ（id・写像係数・原点・
- *   有効域 bbox）も本ファイルに機械可読な正本として収載する（設計 K12）。
- * - 数値設計の原則（設計 K5）: geo 点の lon/lat オフセットは 2 の冪の分数
+ *   有効域 bbox）も本ファイルに機械可読な正本として収載する。
+ * - 数値設計の原則: geo 点の lon/lat オフセットは 2 の冪の分数
  *   （±0.5, ±0.75, ±0.078125 = 2^-7 の倍数）に限定する。倍精度で `lon - 135.0` 等の減算が
  *   誤差ゼロになり、期待値が厳密な有限小数になる。∴ tolerance 1e-9 の assert が丸め誤差の
  *   影響を受けない。
  *
  * 本ファイルを改訂する場合は `fixtureVersion` を上げ、契約文書と Teiresias 側コピーを
- * 同一変更で追随させること（outer rule-0015 と同型の規律）。
+ * 同一変更で追随させること（契約変更は依存側を同一変更で追随させる、という規律と同型）。
  */
 
 /** fixture の版。改訂時に上げる（契約文書に記載された版と一致すること）。 */
-export const fixtureVersion = '1.0.1';
+export const fixtureVersion = '1.0.2';
 
 /** mock が対応する唯一の geoBasis（lonlat_deg / lon-lat 順）。 */
 export const geoBasisLonLat = { kind: 'lonlat_deg', axisOrder: 'lon-lat' } as const;
@@ -121,7 +121,7 @@ export const outOfBboxPoints = [
 export const unknownId = 'MOCK:NO-SUCH';
 
 // ---------------------------------------------------------------------------
-// (d) m1-t1 推奨 E2E GCP セット（真値候補 = MOCK:PLANE-A）
+// (d) Teiresias の E2E 向けの推奨 GCP セット（真値候補 = MOCK:PLANE-A）
 // ---------------------------------------------------------------------------
 
 /**
@@ -136,7 +136,7 @@ export const unknownId = 'MOCK:NO-SUCH';
  * similarity で厳密適合できず、affine 採用として 6 値（上と同じ値）が返る。
  * geo bbox の辺長 ≈ 8.7 km（緯度辺。対角は約 11〜12 km）であり L_geo gate 100 m を大きく超える。
  *
- * 本データは m1-t1 への **推奨**であり、m1-t1 のテスト設計を拘束しない。
+ * 本データは Teiresias の E2E への **推奨**であり、そのテスト設計を拘束しない。
  */
 export const recommendedE2eGcps: ReadonlyArray<{
   pixel: readonly [number, number];

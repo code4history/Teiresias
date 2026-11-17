@@ -1,13 +1,14 @@
 /**
- * demo バンドルの browser 適合性を機械検証する（m3-t1 設計 v1.3 §6.3(b) / m3-t1/AC-4）。
+ * demo バンドルの browser 適合性を機械検証する。
  *
- * これは **C11（Daedalus の browser 動作）解消のうち「バンドル可能性」行**の裏づけである。
- * **`browser runtime での実行` 行の裏づけにはならない**（そちらは m3-t1/AC-16 の 1 回観測）。
- * 2 つの行を混ぜないことは設計 §3.4 / K1 / K19 の規律である。
+ * これは **Daedalus のブラウザでの動作のうち「バンドルできること」**の裏づけである。
+ * **「browser runtime で実行できること」の裏づけにはならない**（そちらは実ブラウザでの 1 回観測）。
+ * 2 つの行を混ぜない。
  *
- * `Atlas/scripts/verify-packed-browser-runtime.mjs` の**軽量版**である（設計 §7 の
- * 「逸脱（軽量化）」）: Teiresias は `HR-m3-005` により publish しない ∴ `npm pack` 経路を
- * 通す意味が無く、demo build の出力チャンクを走査する形へ縮めた。
+ * `Atlas/scripts/verify-packed-browser-runtime.mjs` の**軽量版**である
+ * （初期の版では Teiresias を publish しない方針だったため、`npm pack` の経路を持たない形にし、
+ * demo build の出力チャンクを走査する形へ縮めた。今は publish するが、この検査が確かめるのは
+ * demo のバンドルのブラウザ適合性であり、公開する tarball の中身ではない）。
  *
  * 検査は 4 つ:
  *   (1) `dist-demo/` が無ければ「先に build:demo を実行せよ」と言って exit 1（黙って成功しない）
@@ -32,7 +33,7 @@ const PROJ_WASM_RUNTIME_ASSETS = new Set([
   "proj-emscripten.wasm",
 ]);
 
-/** Node 固有指定子の needle（設計 §6.3(b) 手順 3）。 */
+/** Node 固有指定子の needle。 */
 const NODE_NEEDLES = [
   "node:",
   "require(",
@@ -54,8 +55,8 @@ const NODE_NEEDLES = [
  *
  * ∴ 検査を緩めずに、**「残る `node:` 出現は、この literal に由来するものが全部である」**
  * ことを要求する。新しい `node:` が 1 つでも増えれば FAIL する（ラチェット）。
- * **実装元（Atlas）は本タスクの触り先ではない**ため、実装元側で規律を強制する道は取れない
- * （`H-9` の正しい形が取れない唯一のケース。理由をここに残す）。
+ * **実装元（Atlas）はこの変更の触り先ではない**ため、実装元側で規律を強制する道は取れない
+ * （「実装元は除外し、実装元の側で規律を強制する」の形が取れない唯一のケース。理由をここに残す）。
  */
 const DEFERRED_NODE_SPECIFIER_LITERAL = '"node:fs/promises"';
 const DEFERRED_NODE_SPECIFIER_MAX = 1;
@@ -143,7 +144,7 @@ if (daedalusChunks.length === 0) {
   violations += 1;
   fail(
     `Daedalus 由来コードの目印 ${JSON.stringify(DAEDALUS_MARKER)} がどのチャンクにも無い。` +
-      "バンドルに Daedalus が入っていない ∴ この検査は C11 の裏づけにならない。",
+      "バンドルに Daedalus が入っていない ∴ この検査は Daedalus をバンドルできることの裏づけにならない。",
   );
 }
 

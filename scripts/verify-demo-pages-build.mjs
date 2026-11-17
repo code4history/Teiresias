@@ -1,5 +1,5 @@
 /**
- * Pages 成果物の形を検証する（m3-t1 設計 v1.3 §6.3(a) / m3-t1/AC-3）。
+ * Pages 成果物の形を検証する。
  *
  * `Atlas/scripts/verify-demo-pages-build.mjs` の適応であり、差分は次の 2 点だけである:
  *   - 必須ファイルのデモページ名（`demo/crs-estimate-ranking.html`）

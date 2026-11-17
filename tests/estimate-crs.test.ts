@@ -1,13 +1,13 @@
 /**
- * m1-t1 の unit test。
+ * estimateCrs の unit test。
  *
- * - AC-T1 (a): Teiresias 所有 mock が `contractPoints` に対して `expectedPlaneA` /
- *   `expectedPlaneB` と各座標 `1e-9` 以内で一致すること（m0-t3 からの委任 AC の前半）。
+ * - Teiresias 所有 mock が `contractPoints` に対して `expectedPlaneA` /
+ *   `expectedPlaneB` と各座標 `1e-9` 以内で一致すること。
  * - `CandidateTransformer` 8 項目契約と違反シミュレータの全入力域挙動。
- * - AC-m1-3: candidate 単位の失敗隔離と全失敗時の status 規則。
- * - AC-INV: 設計 §6 の不変条件、非空 L_geo gate、option 正規化、warnings 帰属。
+ * - candidate 単位の失敗隔離と全失敗時の status 規則。
+ * - EstimationResult の不変条件、非空 L_geo gate、option 正規化、warnings 帰属。
  * - 公開 API から到達不能な分岐（null-last / `status:'ok'`）は `../src/estimate-crs.js` の
- *   内部 helper を直接 import して単体検証する（設計 K14 / INF-5。package root へは公開しない）。
+ *   内部 helper を直接 import して単体検証する（package root へは公開しない）。
  */
 import { fitWorldFile } from '@c4h/daedalus';
 import { afterEach, describe, expect, it, vi } from 'vitest';
@@ -78,9 +78,9 @@ function expectPointsClose(
   }
 }
 
-describe('AC-T1 (a): Teiresias 所有 mock が fixture の期待値に一致する', () => {
-  it('fixture の版が契約文書の 1.0.1 である', () => {
-    expect(fixtureVersion).toBe('1.0.1');
+describe('Teiresias 所有 mock が fixture の期待値に一致する', () => {
+  it('fixture の版が 1.0.2 である', () => {
+    expect(fixtureVersion).toBe('1.0.2');
     expect(candidateIds).toEqual([planeAId, planeBId]);
     expect(candidateDefinitions.map((d) => d.id)).toEqual([planeAId, planeBId]);
   });
@@ -169,7 +169,7 @@ describe('CandidateTransformer 8 項目契約（Teiresias 側実装）', () => {
   });
 });
 
-describe('違反シミュレータの全入力域挙動（契約文書 §3）', () => {
+describe('違反シミュレータの全入力域挙動', () => {
   it('throwing は入力によらず常に throw する（null 系入力を含む）', () => {
     expect(() => throwingMockTransformer(planeAId, contractPoints, lonlat)).toThrow(
       /always throws/,
@@ -200,7 +200,7 @@ describe('違反シミュレータの全入力域挙動（契約文書 §3）', 
 });
 
 // ---------------------------------------------------------------------------
-// T3: estimateCrs の unit test（AC-m1-3 / AC-INV）
+// T3: estimateCrs の unit test（失敗隔離と不変条件）
 // ---------------------------------------------------------------------------
 
 const planeA = { authority: 'MOCK', code: 'PLANE-A' } as const;
@@ -225,7 +225,7 @@ function recording(inner: CandidateTransformer): {
   };
 }
 
-/** EstimationResult の不変条件（設計 §6 の 1〜7・9）を全数 assert する。 */
+/** EstimationResult の不変条件を全数 assert する。 */
 function assertInvariants(result: EstimationResult, inputs: readonly CandidateCrs[]): void {
   const inputIds = new Set(inputs.map((c) => `${c.authority}:${c.code}`));
   const rankedIds = result.ranked.map((r) => `${r.authority}:${r.code}`);
@@ -281,7 +281,7 @@ const FROZEN_WARNING_CODES = [
   'unsupportedAxisOrder',
 ];
 
-describe('AC-m1-3: candidate 単位の失敗隔離と全失敗時の status', () => {
+describe('candidate 単位の失敗隔離と全失敗時の status', () => {
   it('1 候補が業務的に null でも残候補を継続し、selected は成功候補になる', async () => {
     const result = await estimateCrs(teiresiasE2eGcps, [{ authority: 'MOCK', code: 'NO-SUCH' }, planeA], {
       transformer: mockTransformer,
@@ -397,7 +397,7 @@ describe('AC-m1-3: candidate 単位の失敗隔離と全失敗時の status', ()
   });
 });
 
-describe('AC-INV: 非空 L_geo gate（K15）', () => {
+describe('不変条件: 非空 L_geo gate', () => {
   const tiny = [
     { pixel: [0, 0], geo: [135.0, 35.0] },
     { pixel: [10, 0], geo: [135.0001, 35.0] },
@@ -444,7 +444,7 @@ describe('AC-INV: 非空 L_geo gate（K15）', () => {
   });
 });
 
-describe('AC-INV: option 正規化と selected/ranked（K8）', () => {
+describe('不変条件: option 正規化と selected/ranked', () => {
   it('topK は ranked を切り詰めるが minCandidates 判定は切り詰め前の usable 全件で行う', async () => {
     const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
       transformer: mockTransformer,
@@ -481,7 +481,7 @@ describe('AC-INV: option 正規化と selected/ranked（K8）', () => {
   });
 });
 
-describe('AC-INV: transformer への引数と Daedalus へ渡す basis（K7）', () => {
+describe('不変条件: transformer への引数と Daedalus へ渡す basis', () => {
   it('transformer は id と入力 geo 点列を同順で受け取り、既定 basis は lonlat_deg/lon-lat', async () => {
     const spy = recording(mockTransformer);
     await estimateCrs(teiresiasE2eGcps, [planeA], { transformer: spy.transformer });
@@ -526,7 +526,7 @@ describe('AC-INV: transformer への引数と Daedalus へ渡す basis（K7）',
   });
 });
 
-describe('AC-INV: warnings の帰属（K9）', () => {
+describe('不変条件: warnings の帰属', () => {
   it('成功時 warnings は selected 候補の Daedalus FitWarning だけを同順・同形で返す', async () => {
     const result = await estimateCrs(teiresiasE2eGcps, [planeA, planeB], {
       transformer: mockTransformer,
@@ -552,7 +552,7 @@ describe('AC-INV: warnings の帰属（K9）', () => {
   });
 });
 
-describe('内部 helper の単体検証（公開 API から到達不能な分岐。K14 / K16 / INF-5）', () => {
+describe('内部 helper の単体検証（公開 API から到達不能な分岐）', () => {
   it('deriveSuccessStatus: 合成 warning 配列で ok / ok_with_warnings を導出する', () => {
     expect(deriveSuccessStatus([])).toBe('ok');
     expect(deriveSuccessStatus([{ code: 'validationSkipped' }])).toBe('ok_with_warnings');
@@ -669,7 +669,7 @@ describe('内部 helper の単体検証（公開 API から到達不能な分岐
     }
   });
 
-  it('computeObservationScale: 3 basis の L_geo を設計 §5.3 どおり算出する', () => {
+  it('computeObservationScale: 3 basis の L_geo を定義どおり算出する', () => {
     const lonlatGcps = [
       { pixel: [0, 0], geo: [135, 35] },
       { pixel: [1, 1], geo: [135.5, 35] },

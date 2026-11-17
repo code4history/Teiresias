@@ -1,14 +1,13 @@
 /**
- * `CandidateTransformer` 契約の **Teiresias 側実装**（Mock 二層所有の消費側。契約文書 §5）。
+ * `CandidateTransformer` 契約の **Teiresias 側実装**（Mock 二層所有の消費側）。
  *
  * 【二層所有】
  * 契約定義・参照実装・fixture の正本は Daedalus 側 testkit にある。Teiresias はそれを
- * **package 越し import も相対パス import もしない**（契約文書 §5.1、委任 AC `m0-t3/AC-T2`）。
+ * **package 越し import も相対パス import もしない**。
  * 数値正本である fixture だけを `mockContractFixture.ts` へ**ファイルコピー**して持ち込み
- * （SHA-256 で同一性を機械照合する）、判定分岐は本ファイルが Teiresias 所有として再実装する
- * （設計 K12）。
+ * （SHA-256 で同一性を機械照合する）、判定分岐は本ファイルが Teiresias 所有として再実装する。
  *
- * 【判定順序】（契約文書 §2.1。上から評価し最初に該当した分岐で確定する）
+ * 【判定順序】（上から評価し最初に該当した分岐で確定する）
  *  1. `points.length === 0`                       -> null   契約(4)
  *  2. geoBasis が lonlat_deg / lon-lat でない     -> null   契約(7)
  *  3. id がカタログに無い（書式不正を含む）       -> null   契約(7)
@@ -145,7 +144,7 @@ export const conformingTransformers: ReadonlyArray<CandidateTransformer> = [
 ];
 
 /**
- * Teiresias 所有の E2E GCP セット（5 点。設計 §7.2 の E2E に使う）。
+ * Teiresias 所有の E2E GCP セット（5 点。2 候補 E2E に使う）。
  *
  * 【なぜ fixture の `recommendedE2eGcps` をそのまま使わないか（実装工程での実測に基づく設計逸脱）】
  * fixture の `recommendedE2eGcps` は `lat = 35 - v*0.0078125`（pixel y 下正 / 北上正）であり、
@@ -154,9 +153,9 @@ export const conformingTransformers: ReadonlyArray<CandidateTransformer> = [
  * スケールのみ**を表現でき、反射を表現できない。
  * ∴ `recommendedE2eGcps` では PLANE-A も basic similarity で厳密適合せず、実測で
  *   PLANE-A basicRms = 5522.170500128557 / PLANE-B basicRms = 4791.8865398246935
- * となり **PLANE-B が basic score で先着**する（AC-m1-2 の「PLANE-A が ranked[0]」と矛盾する）。
- * fixture 自身が `recommendedE2eGcps` を「m1-t1 への**推奨**であり、m1-t1 のテスト設計を
- * 拘束しない」と明記しているため、AC-m1-2 の趣旨（basic-before-shear が誤候補の affine 救済を
+ * となり **PLANE-B が basic score で先着**する（2 候補 E2E の「PLANE-A が ranked[0]」と矛盾する）。
+ * fixture 自身が `recommendedE2eGcps` を「Teiresias の E2E への**推奨**であり、そのテスト設計を
+ * 拘束しない」と明記しているため、2 候補 E2E の趣旨（basic-before-shear が誤候補の affine 救済を
  * 防ぐこと）を満たす**反射なし**の同型セットを Teiresias 側で所有する。
  *
  * 反射ありの `recommendedE2eGcps` に対する実測挙動は
@@ -169,7 +168,7 @@ export const conformingTransformers: ReadonlyArray<CandidateTransformer> = [
  *   pixel (u,v) -> lon = 135 + u*0.0078125, lat = 35 + v*0.0078125
  * 期待（PLANE-A・basic similarity で厳密適合）:
  *   xScale=869.6875, xSkew=0, xOrigin=0, ySkew=0, yScale=869.6875, yOrigin=0
- * オフセットは fixture §4.1 と同じく 2 の冪の分数（2⁻⁷ の倍数）に限定してあり、期待値は厳密である。
+ * オフセットは `mockContractFixture.ts` と同じく 2 の冪の分数（2⁻⁷ の倍数）に限定してあり、期待値は厳密である。
  */
 export const teiresiasE2eGcps: ReadonlyArray<GcpPair> = [
   { pixel: [0, 0], geo: [135.0, 35.0] },
