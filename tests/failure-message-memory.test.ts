@@ -64,4 +64,24 @@ describe('失敗 message の切り詰めとメモリ', () => {
     });
     expect(result.failure?.candidates[0].message).toBe(raw.slice(0, TRUNCATED_LENGTH));
   });
+
+  it('message が文字列でない Error や、文字列にできない値の throw でも推定全体は reject しない', async () => {
+    const odd = new Error('x');
+    (odd as unknown as { message: unknown }).message = 12345;
+    const throwers: Array<() => never> = [
+      () => {
+        throw odd;
+      },
+      () => {
+        throw Object.create(null);
+      },
+    ];
+    for (const thrower of throwers) {
+      const result = await estimateCrs(teiresiasE2eGcps, [{ authority: 'MOCK', code: 'C' }], {
+        transformer: thrower,
+      });
+      const message = result.failure?.candidates[0].message;
+      expect(typeof message).toBe('string');
+    }
+  });
 });

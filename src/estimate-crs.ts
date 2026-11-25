@@ -362,7 +362,17 @@ function toCandidateUnits(worldFile: WorldFile, metresPerUnit: number): WorldFil
 
 /** throw / reject された値を message にする（500 文字で切る）。 */
 function messageOf(error: unknown): string {
-  return truncateMessage(error instanceof Error ? error.message : String(error));
+  return truncateMessage(safeString(error instanceof Error ? error.message : error));
+}
+
+/** 文字列にする。`toString` を持たない値・投げる値でも例外にしない。 */
+function safeString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
 }
 
 /**
