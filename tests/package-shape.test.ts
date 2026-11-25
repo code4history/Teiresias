@@ -216,9 +216,16 @@ describe('runtime dependency と公開 surface', () => {
     expect(packageJson.files).toEqual(['dist', 'src', 'README.md', 'README.ja.md']);
   });
 
-  it('公開 root export の runtime surface は estimateCrs だけで、内部 helper を漏出させない', async () => {
+  it('公開 root export の runtime surface は estimateCrs と変換の形の推奨だけで、内部 helper を漏出させない', async () => {
     const publicModule = await import('../src/index.js');
-    expect(Object.keys(publicModule).sort()).toEqual(['estimateCrs']);
+    expect(Object.keys(publicModule).sort()).toEqual([
+      'CRS_SWITCH_MAX_RATIO',
+      'TRANSFORM_SETUP_THRESHOLDS',
+      'estimateCrs',
+      'recommendTransformSetup',
+      'recommendTransformSetupFromScore',
+      'shouldRecommendCrsSwitch',
+    ]);
 
     // 内部 helper は ../src/estimate-crs.js からのみ到達できる（package root に載せない）
     const internals = await import('../src/estimate-crs.js');

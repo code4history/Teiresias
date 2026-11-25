@@ -25,7 +25,7 @@ pnpm add @c4h/teiresias @c4h/atlas
 ## 公開 API
 
 `package.json` の `exports` は public root `"."` のみである。公開されるのは `estimateCrs` と
-公開型だけで、内部 helper（ranking / status 導出）は公開しない。
+変換の形の推奨（「変換の形の推奨」の節）と公開型だけで、内部 helper（ranking / status 導出）は公開しない。
 
 ```ts
 import { estimateCrs } from '@c4h/teiresias';
@@ -201,6 +201,29 @@ transformer の呼び出しは候補ごとに 1 回のまま変わらない。�
 
 ∴ `selected.worldFile` が affine のとき、`selected.rmsMeters` はその worldFile の残差ではない。
 final RMS を別名で公開する API は無い。
+
+## 変換の形の推奨
+
+採った CRS の `score` から、`recommendTransformSetup(result, options?)` が地図の変換の形を推奨する。
+返り値は `TransformRecommendation` = `{ setups, reason, score }` で、`TransformSetup` は次のどれか。
+
+| `TransformSetup` | 意味 |
+|---|---|
+| `worldFileOnly` | CRS＋world file だけ（三角網なし） |
+| `tinGlobal` | CRS＋world file＋三角網。三角網の四辺形の外は world file（大域モデル） |
+| `tinFan` | CRS＋world file＋三角網。四辺形の外は重心からの扇形 |
+
+- 閾値は `TRANSFORM_SETUP_THRESHOLDS`（`score` が 0.005 未満なら `worldFileOnly`、0.035 以上なら `tinFan`、
+  その間は `tinGlobal`）。境の近く（0.003〜0.008 と 0.03〜0.04）では 2 つを返し、`reason`
+  （`RecommendationReason`）は `'borderline'`。近い側が先。実在の地図 7 枚から置いた仮の値で、実例が増えたら見直す。
+- `RecommendOptions.vertexMode: 'birdeye'` なら `tinFan` だけ（鳥瞰図の大域モデルは射影で、world file ではない）。
+- `status` が `ok`／`ok_with_warnings` でない、`selected` か `score` が無い、`qualityGate` が `preview`
+  のときは推奨しない（`reason: 'unavailable'`）。
+- `recommendTransformSetupFromScore(score, options?)` は score だけから同じことをする。
+- `shouldRecommendCrsSwitch(bestScore, baseScore)` は、基準の CRS（EPSG:3857）から最良の候補への乗り換えを
+  推奨するかを返す。最良の score が基準の `CRS_SWITCH_MAX_RATIO`（0.95）倍以下のときだけ。都市の広さでは
+  候補の差は 0.5 % 未満で、乗り換えてもビューアに投影の定義が要るだけになるため。
+- 推奨は助言で、どれを採るかは Editor の利用者が決める。
 
 ## status と診断
 

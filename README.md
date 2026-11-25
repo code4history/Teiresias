@@ -24,8 +24,9 @@ pnpm add @c4h/teiresias @c4h/atlas
 
 ## Public API
 
-The `exports` of `package.json` only exposes the public root `"."`. Only `estimateCrs` and the public
-types are exposed; the internal helpers (ranking / status derivation) are not.
+The `exports` of `package.json` only exposes the public root `"."`. Only `estimateCrs`, the transform-setup
+recommendation (see "Recommending the transform setup") and the public types are exposed; the internal
+helpers (ranking / status derivation) are not.
 
 ```ts
 import { estimateCrs } from '@c4h/teiresias';
@@ -219,6 +220,33 @@ of `selected.worldFile` (`xScale * yScale - xSkew * ySkew < 0`).
 
 Therefore, when `selected.worldFile` is affine, `selected.rmsMeters` is not the residual of that
 worldFile. There is no API that exposes the final RMS under a different name.
+
+## Recommending the transform setup
+
+From the `score` of the adopted CRS, `recommendTransformSetup(result, options?)` recommends how the map
+should be transformed. It returns `TransformRecommendation` = `{ setups, reason, score }`, where each
+`TransformSetup` is one of:
+
+| `TransformSetup` | meaning |
+|---|---|
+| `worldFileOnly` | CRS + world file only (no triangulation) |
+| `tinGlobal` | CRS + world file + triangulation; outside the triangulation's quadrilateral the world file (the global model) is used |
+| `tinFan` | CRS + world file + triangulation; outside the quadrilateral the fan from the centroid is used |
+
+- The thresholds are `TRANSFORM_SETUP_THRESHOLDS` (`score` below 0.005 → `worldFileOnly`, 0.035 and above →
+  `tinFan`, otherwise `tinGlobal`). Near a border (0.003–0.008 and 0.03–0.04) two setups are returned and the
+  `reason` (`RecommendationReason`) is `'borderline'`; the closer one comes first. They are provisional
+  values set from seven real maps and will be revised as more maps are measured.
+- With `RecommendOptions.vertexMode: 'birdeye'` only `tinFan` is recommended (the global model of a
+  bird's-eye view is a projective transform, not a world file).
+- Nothing is recommended (`reason: 'unavailable'`) when `status` is not `ok`/`ok_with_warnings`, when there
+  is no `selected` or no `score`, or when `qualityGate` is `preview`.
+- `recommendTransformSetupFromScore(score, options?)` does the same from a bare score.
+- `shouldRecommendCrsSwitch(bestScore, baseScore)` tells whether switching from the base CRS (EPSG:3857)
+  to the best candidate is worth recommending: only when the best score is at most
+  `CRS_SWITCH_MAX_RATIO` (0.95) times the base score. At city scale the candidates differ by less than
+  0.5 %, and switching would only add a projection definition to the viewer.
+- The recommendation is advice; which setup to adopt is the decision of the Editor's user.
 
 ## Status and diagnostics
 
