@@ -365,8 +365,13 @@ function messageOf(error: unknown): string {
   return truncateMessage(error instanceof Error ? error.message : String(error));
 }
 
+/**
+ * 500 文字で切り、新しい文字列へ写して返す。
+ * `slice` の結果は実行環境によって元の文字列を指したまま残る ∴ そのまま持つと、切った後も元の全文が
+ * 解放されない。code point ごとに分けてつなぎ直すと、内容は同じで元を指さない文字列になる。
+ */
 function truncateMessage(message: string): string {
-  return message.length > FAILURE_MESSAGE_MAX_LENGTH ? message.slice(0, FAILURE_MESSAGE_MAX_LENGTH) : message;
+  return Array.from(message.slice(0, FAILURE_MESSAGE_MAX_LENGTH)).join('');
 }
 
 /** 中止の理由（`signal.reason` が無ければ `AbortError` の `DOMException`）。 */
