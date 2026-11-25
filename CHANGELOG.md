@@ -8,5 +8,7 @@ Notable changes to this project are recorded here. Versions follow [Semantic Ver
 ### Added
 - 初版。npm に `@c4h/teiresias` として公開します。主な API は `estimateCrs`（対応点と候補の CRS から、もっともよく当たる CRS とワールドファイルを推定する）と、その入出力の型（`CandidateCrs`・`CandidateTransformer`・`EstimateOptions`・`EstimationResult`・`EstimationFailure` ほか）です。全 export は README の公開 API の節にあります。候補と変換関数は `@c4h/atlas` の `listProjectedCrsFromProjWasm` と `createCandidateTransformer` で作れます。
 - First release, published to npm as `@c4h/teiresias`. The main API is `estimateCrs` (estimates the CRS and world file that best fit the ground control points among the candidate CRSs) and the types of its input and output (`CandidateCrs`, `CandidateTransformer`, `EstimateOptions`, `EstimationResult`, `EstimationFailure` and others). Every export is listed in the Public API section of the README. The candidates and the transformer can be made with `listProjectedCrsFromProjWasm` and `createCandidateTransformer` of `@c4h/atlas`.
+- 失敗の `message` は 500 文字で切った後、元の文面を保持しません（長い文面の失敗が多数あってもメモリが増え続けません）。
+- A failure `message` no longer keeps the original text after it is cut to 500 characters (memory does not keep growing when many failures carry long texts).
 - 既知の制約は README の「[既知の制限](./README.ja.md#既知の制限)」にあります。
 - Known limitations are described in "[Known limitations](./README.md#known-limitations)" in the README.

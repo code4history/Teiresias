@@ -362,11 +362,26 @@ function toCandidateUnits(worldFile: WorldFile, metresPerUnit: number): WorldFil
 
 /** throw / reject された値を message にする（500 文字で切る）。 */
 function messageOf(error: unknown): string {
-  return truncateMessage(error instanceof Error ? error.message : String(error));
+  return truncateMessage(safeString(error instanceof Error ? error.message : error));
 }
 
+/** 文字列にする。`toString` を持たない値・投げる値でも例外にしない。 */
+function safeString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  try {
+    return String(value);
+  } catch {
+    return Object.prototype.toString.call(value);
+  }
+}
+
+/**
+ * 500 文字で切り、新しい文字列へ写して返す。
+ * `slice` の結果は実行環境によって元の文字列を指したまま残る ∴ そのまま持つと、切った後も元の全文が
+ * 解放されない。code point ごとに分けてつなぎ直すと、内容は同じで元を指さない文字列になる。
+ */
 function truncateMessage(message: string): string {
-  return message.length > FAILURE_MESSAGE_MAX_LENGTH ? message.slice(0, FAILURE_MESSAGE_MAX_LENGTH) : message;
+  return Array.from(message.slice(0, FAILURE_MESSAGE_MAX_LENGTH)).join('');
 }
 
 /** 中止の理由（`signal.reason` が無ければ `AbortError` の `DOMException`）。 */
