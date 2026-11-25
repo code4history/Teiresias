@@ -23,7 +23,7 @@ export type RecommendationReason =
   | 'borderline'
   /** 鳥瞰図なので `tinFan` だけ */
   | 'birdeye'
-  /** 推定が使えない（`status` が ok でない・`selected` が無い・score が無い・GCP が少ない） */
+  /** 推定が使えない（`status` が `ok`／`ok_with_warnings` でない・`selected` が無い・score が無い・GCP が少ない）、または score が非有限・負 */
   | 'unavailable';
 
 /** 推奨の結果。 */
@@ -39,7 +39,8 @@ export interface TransformRecommendation {
  * 推奨の閾値（`score` = 相似の残差 RMS ÷ GCP の bbox の対角）。仮の値。
  *
  * - `worldFileOnly` 未満なら `worldFileOnly`、`fan` 以上なら `tinFan`、その間は `tinGlobal`
- * - `*Band` の範囲は境の近くとして 2 つを返す
+ * - `*Band` の範囲は境の近くとして 2 つを返す。範囲は下端を含み上端を含まない半開区間 `[lo, hi)`
+ * - 判定の優先は、不正な score（`unavailable`）→ 鳥瞰図（`birdeye`）→ 境の近く（`borderline`）→ それ以外（`clear`）
  */
 export const TRANSFORM_SETUP_THRESHOLDS = Object.freeze({
   worldFileOnly: 0.005,
@@ -106,10 +107,11 @@ export function recommendTransformSetup(
  *
  * 都市の広さでは候補どうしの score の差がごく小さく（0.5 % 未満の実測）、乗り換えても位置は
  * 変わらずビューアに投影の定義が要るだけになる。最良の候補の score が 3857 の score の
- * `CRS_SWITCH_MAX_RATIO` 倍以下のときだけ `true`。どちらかが無ければ `false`。
+ * `CRS_SWITCH_MAX_RATIO` 倍以下のときだけ `true`。どちらかが `null`・非有限、`bestScore` が負、
+ * `baseScore` が 0 以下なら `false`。
  */
 export function shouldRecommendCrsSwitch(bestScore: number | null, baseScore: number | null): boolean {
   if (bestScore === null || baseScore === null) return false;
-  if (!Number.isFinite(bestScore) || !Number.isFinite(baseScore) || baseScore <= 0) return false;
+  if (!Number.isFinite(bestScore) || !Number.isFinite(baseScore) || bestScore < 0 || baseScore <= 0) return false;
   return bestScore <= baseScore * CRS_SWITCH_MAX_RATIO;
 }

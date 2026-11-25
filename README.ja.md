@@ -215,13 +215,17 @@ final RMS を別名で公開する API は無い。
 
 - 閾値は `TRANSFORM_SETUP_THRESHOLDS`（`score` が 0.005 未満なら `worldFileOnly`、0.035 以上なら `tinFan`、
   その間は `tinGlobal`）。境の近く（0.003〜0.008 と 0.03〜0.04）では 2 つを返し、`reason`
-  （`RecommendationReason`）は `'borderline'`。近い側が先。実在の地図 7 枚から置いた仮の値で、実例が増えたら見直す。
+  （`RecommendationReason`）は `'borderline'`。近い側が先。実在の地図 7 枚から置いた仮の値で、実例が増えたら見直す。境の範囲は下端を含み上端を含まない
+  （`[0.003, 0.008)` と `[0.03, 0.04)`。0.008・0.04 ちょうどは 1 つ）。
+- `RecommendationReason` は `'clear'`（1 つ）・`'borderline'`（2 つ）・`'birdeye'`・`'unavailable'` のどれか。
+  不正な score は `'birdeye'` より、`'birdeye'` は `'borderline'` より優先する。
 - `RecommendOptions.vertexMode: 'birdeye'` なら `tinFan` だけ（鳥瞰図の大域モデルは射影で、world file ではない）。
-- `status` が `ok`／`ok_with_warnings` でない、`selected` か `score` が無い、`qualityGate` が `preview`
-  のときは推奨しない（`reason: 'unavailable'`）。
+- `status` が `ok`／`ok_with_warnings` でない、`selected` か `score` が無い、`qualityGate` が `preview`、
+  score が非有限か負のときは推奨しない（`reason: 'unavailable'`・`setups: []`・`score: null`）。
 - `recommendTransformSetupFromScore(score, options?)` は score だけから同じことをする。
 - `shouldRecommendCrsSwitch(bestScore, baseScore)` は、基準の CRS（EPSG:3857）から最良の候補への乗り換えを
-  推奨するかを返す。最良の score が基準の `CRS_SWITCH_MAX_RATIO`（0.95）倍以下のときだけ。都市の広さでは
+  推奨するかを返す。最良の score が基準の `CRS_SWITCH_MAX_RATIO`（0.95）倍以下のときだけ。どちらかが `null`・非有限、
+  最良が負、基準が 0 以下なら `false`。都市の広さでは
   候補の差は 0.5 % 未満で、乗り換えてもビューアに投影の定義が要るだけになるため。
 - 推奨は助言で、どれを採るかは Editor の利用者が決める。
 

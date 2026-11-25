@@ -55,12 +55,24 @@ describe('recommendTransformSetupFromScore', () => {
     expect(recommendTransformSetupFromScore(TRANSFORM_SETUP_THRESHOLDS.fanBand[1])).toEqual({ setups: ['tinFan'], reason: 'clear', score: 0.04 });
   });
 
+  it('境界値ちょうどの扱い（下端を含み上端を含まない）', () => {
+    expect(recommendTransformSetupFromScore(0)).toEqual({ setups: ['worldFileOnly'], reason: 'clear', score: 0 });
+    expect(recommendTransformSetupFromScore(0.005)).toEqual({ setups: ['tinGlobal', 'worldFileOnly'], reason: 'borderline', score: 0.005 });
+    expect(recommendTransformSetupFromScore(0.03)).toEqual({ setups: ['tinGlobal', 'tinFan'], reason: 'borderline', score: 0.03 });
+    expect(recommendTransformSetupFromScore(0.035)).toEqual({ setups: ['tinFan', 'tinGlobal'], reason: 'borderline', score: 0.035 });
+  });
+
+  it('鳥瞰図は境の近くより優先し、不正な score は鳥瞰図より優先する', () => {
+    expect(recommendTransformSetupFromScore(0.035, { vertexMode: 'birdeye' })).toEqual({ setups: ['tinFan'], reason: 'birdeye', score: 0.035 });
+    expect(recommendTransformSetupFromScore(Number.NaN, { vertexMode: 'birdeye' })).toEqual({ setups: [], reason: 'unavailable', score: null });
+  });
+
   it('鳥瞰図は tinFan だけ', () => {
     expect(recommendTransformSetupFromScore(0.001, { vertexMode: 'birdeye' })).toEqual({ setups: ['tinFan'], reason: 'birdeye', score: 0.001 });
   });
 
   it('非有限・負の score は推奨しない', () => {
-    for (const s of [Number.NaN, Infinity, -0.01]) {
+    for (const s of [Number.NaN, Infinity, -Infinity, -0.01]) {
       expect(recommendTransformSetupFromScore(s)).toEqual({ setups: [], reason: 'unavailable', score: null });
     }
   });
@@ -79,6 +91,15 @@ describe('recommendTransformSetup', () => {
     expect(recommendTransformSetup({ ...result(), selected: null })).toEqual(none);
     expect(recommendTransformSetup(result({ score: null }))).toEqual(none);
     expect(recommendTransformSetup(result({ qualityGate: 'preview' }))).toEqual(none);
+    expect(recommendTransformSetup(result({ score: Number.NaN }))).toEqual(none);
+    expect(recommendTransformSetup(result({ score: -0.01 }))).toEqual(none);
+  });
+
+  it('鳥瞰図の指定は渡り、使えない推定結果は鳥瞰図より優先する', () => {
+    expect(recommendTransformSetup(result(), { vertexMode: 'birdeye' })).toEqual({ setups: ['tinFan'], reason: 'birdeye', score: 0.02 });
+    const none = { setups: [], reason: 'unavailable', score: null };
+    expect(recommendTransformSetup(result({ qualityGate: 'preview' }), { vertexMode: 'birdeye' })).toEqual(none);
+    expect(recommendTransformSetup(result({}, 'failed'), { vertexMode: 'birdeye' })).toEqual(none);
   });
 });
 
@@ -87,6 +108,8 @@ describe('shouldRecommendCrsSwitch', () => {
     expect(shouldRecommendCrsSwitch(0.02 * CRS_SWITCH_MAX_RATIO, 0.02)).toBe(true);
     expect(shouldRecommendCrsSwitch(0.0199, 0.02)).toBe(false);
     expect(shouldRecommendCrsSwitch(0.03, 0.02)).toBe(false);
+    expect(shouldRecommendCrsSwitch(0.02 * CRS_SWITCH_MAX_RATIO + 1e-12, 0.02)).toBe(false);
+    expect(shouldRecommendCrsSwitch(0, 0.02)).toBe(true);
   });
 
   it('どちらかが無い・非有限・3857 が 0 なら推奨しない', () => {
@@ -94,5 +117,11 @@ describe('shouldRecommendCrsSwitch', () => {
     expect(shouldRecommendCrsSwitch(0.01, null)).toBe(false);
     expect(shouldRecommendCrsSwitch(Number.NaN, 0.02)).toBe(false);
     expect(shouldRecommendCrsSwitch(0, 0)).toBe(false);
+    expect(shouldRecommendCrsSwitch(-0.01, 0.02)).toBe(false);
+    expect(shouldRecommendCrsSwitch(0.01, -0.02)).toBe(false);
+    for (const x of [Number.NaN, Infinity, -Infinity]) {
+      expect(shouldRecommendCrsSwitch(x, 0.02)).toBe(false);
+      expect(shouldRecommendCrsSwitch(0.01, x)).toBe(false);
+    }
   });
 });

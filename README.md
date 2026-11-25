@@ -236,15 +236,21 @@ should be transformed. It returns `TransformRecommendation` = `{ setups, reason,
 - The thresholds are `TRANSFORM_SETUP_THRESHOLDS` (`score` below 0.005 → `worldFileOnly`, 0.035 and above →
   `tinFan`, otherwise `tinGlobal`). Near a border (0.003–0.008 and 0.03–0.04) two setups are returned and the
   `reason` (`RecommendationReason`) is `'borderline'`; the closer one comes first. They are provisional
-  values set from seven real maps and will be revised as more maps are measured.
+  values set from seven real maps and will be revised as more maps are measured. Each band includes its
+  lower end and excludes its upper end (`[0.003, 0.008)` and `[0.03, 0.04)`; exactly 0.008 or 0.04 gives a
+  single setup).
+- `RecommendationReason` is one of `'clear'` (one setup), `'borderline'` (two setups), `'birdeye'` and
+  `'unavailable'`. An invalid score takes precedence over `'birdeye'`, and `'birdeye'` over `'borderline'`.
 - With `RecommendOptions.vertexMode: 'birdeye'` only `tinFan` is recommended (the global model of a
   bird's-eye view is a projective transform, not a world file).
-- Nothing is recommended (`reason: 'unavailable'`) when `status` is not `ok`/`ok_with_warnings`, when there
-  is no `selected` or no `score`, or when `qualityGate` is `preview`.
+- Nothing is recommended (`reason: 'unavailable'`, `setups: []`, `score: null`) when `status` is not
+  `ok`/`ok_with_warnings`, when there is no `selected` or no `score`, when `qualityGate` is `preview`, or
+  when the score is not finite or negative.
 - `recommendTransformSetupFromScore(score, options?)` does the same from a bare score.
 - `shouldRecommendCrsSwitch(bestScore, baseScore)` tells whether switching from the base CRS (EPSG:3857)
   to the best candidate is worth recommending: only when the best score is at most
-  `CRS_SWITCH_MAX_RATIO` (0.95) times the base score. At city scale the candidates differ by less than
+  `CRS_SWITCH_MAX_RATIO` (0.95) times the base score. It returns `false` when either is `null` or not
+  finite, when the best score is negative, or when the base score is 0 or less. At city scale the candidates differ by less than
   0.5 %, and switching would only add a projection definition to the viewer.
 - The recommendation is advice; which setup to adopt is the decision of the Editor's user.
 

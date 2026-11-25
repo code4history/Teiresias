@@ -11,7 +11,14 @@ import { describe, expect, it } from 'vitest';
 
 import type { ProjectedCrsInfo } from '@c4h/atlas';
 
-import { estimateCrs } from '../src/index.js';
+import {
+  CRS_SWITCH_MAX_RATIO,
+  TRANSFORM_SETUP_THRESHOLDS,
+  estimateCrs,
+  recommendTransformSetup,
+  recommendTransformSetupFromScore,
+  shouldRecommendCrsSwitch,
+} from '../src/index.js';
 import type {
   CandidateCrs,
   CandidateFailure,
@@ -28,6 +35,10 @@ import type {
   LinearUnit,
   MaybePromise,
   QualityGate,
+  RecommendOptions,
+  RecommendationReason,
+  TransformRecommendation,
+  TransformSetup,
   WorldFile,
 } from '../src/index.js';
 
@@ -180,6 +191,27 @@ export type ProjectedCrsInfoIsAssignableToCandidateCrs = AssertAssignableTo<
 // --- estimateCrs の signature -------------------------------------------------
 const invoke = (): Promise<EstimationResult> => estimateCrs(gcps, [candidate], fullOptions);
 
+
+// --- 変換の形の推奨: 3 関数・2 定数・4 型を値で束縛する ---------------------------
+const allSetups: readonly TransformSetup[] = ['worldFileOnly', 'tinGlobal', 'tinFan'];
+const allReasons: readonly RecommendationReason[] = ['clear', 'borderline', 'birdeye', 'unavailable'];
+const recommendOptions: RecommendOptions = { vertexMode: 'birdeye' };
+const plainOptions: RecommendOptions = { vertexMode: 'plain' };
+const recommendFromResult: (result: EstimationResult, options?: RecommendOptions) => TransformRecommendation =
+  recommendTransformSetup;
+const recommendFromScore: (score: number, options?: RecommendOptions) => TransformRecommendation =
+  recommendTransformSetupFromScore;
+const crsSwitch: (bestScore: number | null, baseScore: number | null) => boolean = shouldRecommendCrsSwitch;
+const switchRatio: number = CRS_SWITCH_MAX_RATIO;
+const thresholds: {
+  readonly worldFileOnly: number;
+  readonly worldFileOnlyBand: readonly [number, number];
+  readonly fan: number;
+  readonly fanBand: readonly [number, number];
+} = TRANSFORM_SETUP_THRESHOLDS;
+const sampleRecommendation: TransformRecommendation = { setups: ['tinGlobal', 'tinFan'], reason: 'borderline', score: 0.031 };
+const emptyRecommendation: TransformRecommendation = { setups: [], reason: 'unavailable', score: null };
+
 describe('api smoke（公開型と estimateCrs signature の compile-time 束縛）', () => {
   it('estimateCrs は Promise<EstimationResult> を返し、6 フィールドが型どおりである', async () => {
     const result: EstimationResult = await invoke();
@@ -277,5 +309,17 @@ describe('api smoke（公開型と estimateCrs signature の compile-time 束縛
     expect(fullOptions.timeoutMs).toBe(60_000);
     expect(fullOptions.signal?.aborted).toBe(false);
     expect(unboundedOptions.timeoutMs).toBe(Infinity);
+  });
+  it('変換の形の推奨の型束縛に使った値が実体を持つ', () => {
+    expect(allSetups).toHaveLength(3);
+    expect(allReasons).toHaveLength(4);
+    expect(recommendFromScore(0.02, plainOptions)).toEqual({ setups: ['tinGlobal'], reason: 'clear', score: 0.02 });
+    expect(recommendFromScore(0.02, recommendOptions).reason).toBe('birdeye');
+    expect(recommendFromResult).toBe(recommendTransformSetup);
+    expect(crsSwitch(0.01, 0.02)).toBe(true);
+    expect(switchRatio).toBe(0.95);
+    expect(thresholds.fanBand).toEqual([0.03, 0.04]);
+    expect(sampleRecommendation.setups).toHaveLength(2);
+    expect(emptyRecommendation.score).toBeNull();
   });
 });
