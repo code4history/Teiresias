@@ -511,7 +511,8 @@ describe('相対順位の実測固定・正規化なし（direct-only） — 反
 
     expect(rankedIds(forwardResult)[0]).toBe(TRUE_ID);
     expect(rankedIds(forwardResult).slice(1).sort()).toEqual(['EPSG:6673', 'EPSG:6675']);
-    expect(rankedIds(reflectedResult).slice(1).sort()).toEqual(['EPSG:6673', 'EPSG:6675']);
+    // 反射ありは 3 件の score が地上の距離で同着になる ∴ 先頭は差で決まらない。3 件とも ranked に残ることだけを assert する
+    expect(rankedIds(reflectedResult).sort()).toEqual([...REQUIRED_IDS].sort());
   });
 
   it('(a) 順位ではなく「2 位・3 位の相対差の桁」で現象を固定する', async () => {
@@ -521,9 +522,11 @@ describe('相対順位の実測固定・正規化なし（direct-only） — 反
     // 「相対差」は上の表の #7 / #8 と同じ定義（差 ÷ 大きいほう = 3 位の値）を採る。
     // 実測: 反射なし 0.29994918928…（表 #7 の 2.9994918928e-1 と一致）/
     //       反射あり 5.7193205293576197e-11（表 #8 の 5.7193205290e-11 と一致）
+    // 順位を決める score（地上の距離に直した残差）で測る。rmsMeters は候補の座標での残差で、帯ごとの縮尺係数
+    // （0.9999 前後）の差が相対 2e-4 ほど混ざるため、反射ありでは 3 件の差がその分に隠れてしまう
     const relativeGap = (result: EstimationResult): number => {
-      const second = result.ranked[1].rmsMeters;
-      const third = result.ranked[2].rmsMeters;
+      const second = result.ranked[1].score as number;
+      const third = result.ranked[2].score as number;
       return Math.abs(third - second) / Math.max(Math.abs(second), Math.abs(third));
     };
 
@@ -546,7 +549,7 @@ describe('相対順位の実測固定・正規化なし（direct-only） — 反
     expect(ratio(reflectedResult)).toBeLessThan(1.001);
   });
 
-  it('(d) 既定カタログ 5 件を絞らずに使うと、反射ありで真値が ranked[0] から落ちる', async () => {
+  it('(d) 既定カタログ 5 件を絞らずに使うと、反射ありで 5 件の score が相対 1e-5 以内に潰れる', async () => {
     const candidates = await catalogDefault();
     const sets = await gcpSets();
     const transformer = createCandidateTransformer(candidates);
@@ -556,12 +559,15 @@ describe('相対順位の実測固定・正規化なし（direct-only） — 反
 
     expect(reflectedResult.untransformableIds).toEqual([]);
     const reflectedIds = rankedIds(reflectedResult);
-    expect(reflectedIds[0]).toBe('EPSG:3094');
-    expect(reflectedIds[1]).toBe('EPSG:30166');
-    // 真値は縮退クラスごと 3〜5 位へ落ちる
-    expect(reflectedIds.slice(2).sort()).toEqual(['EPSG:2448', 'EPSG:6674', 'ESRI:112206']);
+    // 反射ありでは、真値の縮退クラス（3 件）と他の 2 件の score が地上の距離でほぼ同じになる。先頭 3 件が真値のクラスに
+    // なるのは同着を identity 順で並べた結果で、差で決まった順位ではない（score を地上の距離に直す前は、
+    // 縮尺係数の差が順位を決めて、真値が ranked[0] から 3〜5 位へ落ちていた）
+    const scores = reflectedResult.ranked.map((entry) => entry.score as number);
+    expect((Math.max(...scores) - Math.min(...scores)) / Math.max(...scores)).toBeLessThan(1e-5);
+    expect(reflectedIds.slice(0, 3).sort()).toEqual(['EPSG:2448', 'EPSG:6674', 'ESRI:112206']);
+    expect(reflectedIds.slice(3).sort()).toEqual(['EPSG:30166', 'EPSG:3094']);
 
-    // 真値クラスに対する相対差（1e-3 相対。#11 / #12）
+    // rmsMeters（候補の座標での残差）の、真値クラスに対する相対差（1e-3 相対。#11 / #12）は変わらない
     const truthClassRms = rmsOf(reflectedResult, TRUE_ID);
     expectRelativeClose(
       Math.abs(truthClassRms - rmsOf(reflectedResult, 'EPSG:3094')) / truthClassRms,

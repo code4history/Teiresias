@@ -181,12 +181,27 @@ and the demo (`demo/atlas-engine.js`) are wired this way.
 
 ## Ranking and score
 
-- The order is decided by the **basic (similarity) RMS before shear**. Since Daedalus may finally adopt
-  affine, using the final RMS for the order would make "affine rescues a wrong candidate and inverts the
-  order" happen.
-- `score = basicRmsMeters / L_geo`. `L_geo` is the observation-area scale (m) common to all the input
-  GCPs, so within the same estimation call the score is equivalent to ascending basic RMS. The score is
-  a relative error with respect to the observation area; it is not a probability or a confidence.
+- The order is decided by the **basic (similarity) RMS before shear**, measured as a distance on the
+  ground (see the next item). Since Daedalus may finally adopt affine, using the final RMS for the order
+  would make "affine rescues a wrong candidate and inverts the order" happen.
+- `score = (basicRmsMeters / k) / L_geo`. **The numerator and the denominator are both distances on the
+  ground (m).**
+  - `L_geo` is the observation-area scale (m) common to all the input GCPs (the diagonal of their
+    bounding box on the ground).
+  - `basicRmsMeters` is the residual in the coordinates of the candidate CRS, so it is stretched by the
+    scale factor of that CRS: about `1 / cos φ` for EPSG:3857 (1.2 to 1.4 in Japan), about 0.9999 for the
+    Japan Plane Rectangular CS and 0.9996 for UTM. `k` is that factor in the area of the GCPs: the ratio of
+    the RMS distance of the GCPs from their centroid in the candidate CRS to the same distance on the
+    ground. Dividing by `k` brings the residual back to a distance on the ground. This needs no extra call
+    of the transformer, and it works for a candidate in feet (the points are already converted to metres)
+    and for an input of `planar_xy` (the input coordinates are the ground).
+  - So the score can be compared **between candidates and with a threshold**, whatever their scale factor:
+    when the map and the ground are exactly similar, the scores of EPSG:3857 and of a plane rectangular CS
+    are equal. The score is a relative error with respect to the observation area; it is not a
+    probability or a confidence.
+  - `rmsMeters` is not divided by `k` (see "The difference in the meaning of `rmsMeters`"). The order of
+    `ranked` follows the score, so it can differ from the order of `rmsMeters` when the candidates have
+    different scale factors.
 - The order given in `datumFamilyPrior` only takes effect on ties (within machine precision). The prior
   never inverts a clear difference in fit. Finally the ordering closes deterministically by the code-unit
   order of the identity.
@@ -213,7 +228,7 @@ of `selected.worldFile` (`xScale * yScale - xSkew * ySkew < 0`).
 
 | value | meaning |
 |---|---|
-| `ranked[].rmsMeters` / `selected.rmsMeters` | **the pre-shear basic RMS used for the ranking**, in metres |
+| `ranked[].rmsMeters` / `selected.rmsMeters` | **the pre-shear basic RMS of the ranking**, in metres of the candidate's own coordinates (not divided by the scale factor `k` of the CRS; the `score` is) |
 | `selected.worldFile` / `selected.qualityGate` | **the final return of Daedalus for the same candidate** (which may include an adopted affine) |
 | `selected.unit` / `ranked[].unit` | **the linear unit of that candidate's coordinates**; `selected.worldFile` is in it, `rmsMeters` is not |
 

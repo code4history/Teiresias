@@ -153,6 +153,11 @@ export interface EstimationFailure {
  * `selected.worldFile` と `selected.qualityGate` は**同じ候補に対する Daedalus の最終返却**
  * （affine 採用を含み得る）である。
  *
+ * `score` は `(basic RMS ÷ k) ÷ L_geo`。`k` は GCP のある領域での、その候補の CRS の縮尺係数（3857 は緯度 φ で
+ * 1/cos φ・平面直角座標系は 0.9999 前後）で、残差を地上の距離に直してから、地上の距離である `L_geo` で割る。
+ * ∴ 縮尺係数の違う候補どうしでも、閾値とも比べられる。`rmsMeters` は `k` で割らない（候補の座標での残差）。
+ * `ranked` の順は `score` に従う。
+ *
  * 単位: `rmsMeters` は全候補で比べられるよう常に metre である。`unit` はその候補の座標の単位で、
  * `worldFile` もその単位の写像（pixel → 候補の座標）である。plain な点列を返した候補は
  * `{ name: 'metre', metresPerUnit: 1 }` になる。
