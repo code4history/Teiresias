@@ -3,7 +3,7 @@
 このプロジェクトの主な変更を記録します。版数は [Semantic Versioning](https://semver.org/) に従います。
 Notable changes to this project are recorded here. Versions follow [Semantic Versioning](https://semver.org/).
 
-## [Unreleased]
+## [1.0.0-rc.1] - 2026-11-26
 
 ### Added
 - 初版。npm に `@c4h/teiresias` として公開します。主な API は `estimateCrs`（対応点と候補の CRS から、もっともよく当たる CRS とワールドファイルを推定する）と、その入出力の型（`CandidateCrs`・`CandidateTransformer`・`EstimateOptions`・`EstimationResult`・`EstimationFailure` ほか）です。全 export は README の公開 API の節にあります。候補と変換関数は `@c4h/atlas` の `listProjectedCrsFromProjWasm` と `createCandidateTransformer` で作れます。
