@@ -231,7 +231,8 @@ describe('デモのプリセットの A と B で出力が分かれる（実 eng
     expect(a.result.discrimination.ratio as number).not.toBeNull();
 
     // B: 識別力が潰れている。反射した GCP の当てはまりは崩れ、候補どうしが地上の距離で同じ当てはまりになる。
-    // 真値の組が先頭に残るかどうかは、差ではなく同着の並び（identity 順）で決まるので、順位は assert しない
+    // 真値の組が先頭に残るかどうかは、崩れた当てはまりの残差の細部（相対 1.4e-6 の差。PROJ の感度は約 1e-10）で
+    // 決まり、真値を選べているわけではないので、順位は assert しない
     // （score を地上の距離に直す前は、縮尺係数の差が順位を決めて、真値が先頭から落ちていた）
     expect(b.result.discrimination.collapsed).toBe(true);
     expect(b.result.discrimination.ratio as number).toBeLessThan(

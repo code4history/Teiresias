@@ -116,7 +116,7 @@ transformer はそのような候補を 2 つの形で返せる。
 Teiresias は返った点列を `metresPerUnit` 倍して metre で当てはめる。holdout の点も同じ倍率で換算し、
 Daedalus へ渡す `[E, N]` は常に metre である。∴
 
-- `ranked` と `selected` の `rmsMeters` は metre のまま（同じ呼び出しの全候補を同じ尺度で比べられる）。
+- `ranked` と `selected` の `rmsMeters` は、単位としては metre のまま（その候補の座標での残差。縮尺係数 `k` では割らない）。候補どうしの比較は、地上の距離に直した `score` で行う。
 - `selected.unit` と `ranked[].unit` はその候補の座標の単位を持つ。plain な点列を返す transformer では
   `{ name: 'metre', metresPerUnit: 1 }` になる。
 - `selected.worldFile` は pixel → **その単位**の写像である。6 値とも `metresPerUnit` で割る
@@ -174,13 +174,15 @@ Teiresias は throw／reject を候補ごとに受け止め、その候補を ad
 - `score = (basicRmsMeters / k) / L_geo`。**分子も分母も地上の距離（m）である。**
   - `L_geo` は入力 GCP 全体に共通する観測域スケール（m。GCP の bbox の、地上での対角）。
   - `basicRmsMeters` は候補の CRS の座標での残差なので、その CRS の縮尺係数だけ伸び縮みしている。
-    EPSG:3857 は `1 / cos φ` 倍（日本では 1.2〜1.4）、平面直角座標系は 0.9999 前後、UTM は 0.9996 前後。
+    EPSG:3857 は `1 / cos φ` 倍（日本では 1.2〜1.4）、平面直角座標系と UTM は 1 前後。
     `k` は GCP のある領域でのその係数で、「候補の CRS での GCP の重心からの RMS 距離」と「同じ GCP の
-    地上での RMS 距離」の比である。`k` で割ると、残差が地上の距離に戻る。transformer を余計に呼ばずに
+    地上での RMS 距離」の比である。ここでの地上は `L_geo` と同じ近似（球。1 度 = 111320 m）なので、`k` には
+    楕円体との差（0.3% 以内。盛岡では +0.16% で、平面直角座標系の `k` は約 0.9984）が入る。`k` で割ると、
+    残差がその地上の距離に戻る。transformer を余計に呼ばずに
     求まり、ft の候補（点は m に直してある）や、入力が `planar_xy` の場合（入力の座標が地上）でも
     そのまま使える。
   - ∴ score は、縮尺係数の違う候補どうしでも、閾値とも**比べられる**。地図と地上がちょうど相似なら、
-    EPSG:3857 と平面直角座標系の score は等しい。score は観測域に対する相対誤差であり、確率・信頼度
+    EPSG:3857 と平面直角座標系の score はほぼ等しい（0.3% 以内）。score は観測域に対する相対誤差であり、確率・信頼度
     ではない。
   - `rmsMeters` は `k` で割らない（「`rmsMeters` の意味の違い」を参照）。`ranked` の順は score に従うので、
     候補の縮尺係数が違うと、`rmsMeters` の順と食い違うことがある。

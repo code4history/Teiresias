@@ -123,8 +123,9 @@ that unit.
 Teiresias multiplies the returned points by `metresPerUnit` and fits in metres: the holdout points are
 converted with the same factor, and the `[E, N]` handed to Daedalus is always metric. Therefore:
 
-- `rmsMeters` (on `ranked` and on `selected`) stays in metres, so every candidate of one call is
-  comparable on the same scale.
+- `rmsMeters` (on `ranked` and on `selected`) stays in metres as a unit (the residual in the coordinates of
+  that candidate, not divided by the scale factor `k`). Compare candidates by the `score`, which is
+  measured as a distance on the ground.
 - `selected.unit` and `ranked[].unit` carry the unit of that candidate's coordinates. They are
   `{ name: 'metre', metresPerUnit: 1 }` for a transformer that returns a plain point list.
 - `selected.worldFile` is the pixel → **that unit** mapping: all six values are divided by
@@ -189,15 +190,17 @@ and the demo (`demo/atlas-engine.js`) are wired this way.
   - `L_geo` is the observation-area scale (m) common to all the input GCPs (the diagonal of their
     bounding box on the ground).
   - `basicRmsMeters` is the residual in the coordinates of the candidate CRS, so it is stretched by the
-    scale factor of that CRS: about `1 / cos φ` for EPSG:3857 (1.2 to 1.4 in Japan), about 0.9999 for the
-    Japan Plane Rectangular CS and 0.9996 for UTM. `k` is that factor in the area of the GCPs: the ratio of
-    the RMS distance of the GCPs from their centroid in the candidate CRS to the same distance on the
-    ground. Dividing by `k` brings the residual back to a distance on the ground. This needs no extra call
+    scale factor of that CRS: about `1 / cos φ` for EPSG:3857 (1.2 to 1.4 in Japan), about 1 for the
+    Japan Plane Rectangular CS and UTM. `k` is that factor in the area of the GCPs: the ratio of the RMS
+    distance of the GCPs from their centroid in the candidate CRS to the same distance on the ground.
+    The ground here is the same approximation as `L_geo` (a sphere, 1 degree = 111320 m), so `k` contains
+    the difference from the ellipsoid (within 0.3 %; +0.16 % at Morioka, where `k` is about 0.9984 for the
+    Plane Rectangular CS). Dividing by `k` brings the residual back to a distance on that ground. This needs no extra call
     of the transformer, and it works for a candidate in feet (the points are already converted to metres)
     and for an input of `planar_xy` (the input coordinates are the ground).
   - So the score can be compared **between candidates and with a threshold**, whatever their scale factor:
     when the map and the ground are exactly similar, the scores of EPSG:3857 and of a plane rectangular CS
-    are equal. The score is a relative error with respect to the observation area; it is not a
+    are nearly equal (within about 0.3 %). The score is a relative error with respect to the observation area; it is not a
     probability or a confidence.
   - `rmsMeters` is not divided by `k` (see "The difference in the meaning of `rmsMeters`"). The order of
     `ranked` follows the score, so it can differ from the order of `rmsMeters` when the candidates have

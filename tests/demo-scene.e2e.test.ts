@@ -128,7 +128,8 @@ describe('デモの現象を実 Atlas engine で固定する', () => {
     expect(reflected.ranked.length).toBeGreaterThan(klass.length);
     expect(reflected.ranked.some((entry) => entry.isTruth)).toBe(true);
     // 反射ありは当てはまりが崩れ、地上の距離で測ると候補によらず同じ当てはまりになる ∴ 識別力が潰れる。
-    // 先頭が真値の縮退クラスになるのは、同着を identity 順で並べた結果であり、差で決まった順位ではない
+    // それでも先頭が真値の縮退クラスになるのは、他の候補より score が 1.4e-6 相対だけ小さい本物の差による
+    // （PROJ の感度は約 1e-10 ∴ 余裕は約 4 桁）。崩れた当てはまりの残差の細部で、真値を選べているわけではない
     // （score を地上の距離に直す前は、縮尺係数の差が順位を決めて、真値が先頭 k 件から落ちていた）
     expect(reflected.discrimination.collapsed).toBe(true);
     // 反射なしでは真値の縮退クラスが先頭 k 件を占め、識別できている（対照）
