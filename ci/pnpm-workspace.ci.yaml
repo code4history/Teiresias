@@ -7,8 +7,8 @@
 #   pnpm-workspace.yaml at the repository root would also make this directory a
 #   workspace root during local development, where the repository is used inside a
 #   larger workspace. CI clones the repository on its own, so the copy is harmless
-#   there. For a local install on its own, copy it the same way first, with Atlas and
-#   Daedalus checked out next to this repository (../Atlas, ../Daedalus).
+#   there. For a local install on its own, copy it the same way first. Atlas and Daedalus
+#   come from npm (their release candidates are published), not from sibling checkouts.
 #
 # Where the allowBuilds list comes from: running `pnpm install` with pnpm 11.27.0,
 #   CI=true, lifecycle scripts enabled and no node_modules fails with
@@ -23,9 +23,3 @@ allowBuilds:
 minimumReleaseAgeExclude:
   - "@maplat/*"
   - "@c4h/*"
-
-overrides:
-  # Until Atlas and Daedalus are on npm, resolve them from the sibling checkouts.
-  # package.json keeps the npm ranges, so the published package never carries link:.
-  "@c4h/daedalus": "link:../Daedalus"
-  "@c4h/atlas": "link:../Atlas"

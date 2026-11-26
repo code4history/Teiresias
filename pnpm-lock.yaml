@@ -4,21 +4,17 @@ settings:
   autoInstallPeers: true
   excludeLinksFromLockfile: false
 
-overrides:
-  '@c4h/daedalus': link:../Daedalus
-  '@c4h/atlas': link:../Atlas
-
 importers:
 
   .:
     dependencies:
       '@c4h/daedalus':
-        specifier: link:../Daedalus
-        version: link:../Daedalus
+        specifier: ^1.0.0-rc.1
+        version: 1.0.0-rc.1
     devDependencies:
       '@c4h/atlas':
-        specifier: link:../Atlas
-        version: link:../Atlas
+        specifier: ^1.0.0-rc.1
+        version: 1.0.0-rc.2
       '@types/node':
         specifier: ^26.6.5
         version: 26.6.5
@@ -75,6 +71,14 @@ packages:
   '@bramus/specificity@2.4.3':
     resolution: {integrity: sha512-0GEz8qJWokkUVYQYRukmkSHIFNoBH8QTreeHrAFbvz1XFYc3Y+puhMs8PQ5x8GNugiC2l5jvDBXKLbBIByeSBw==}
     hasBin: true
+
+  '@c4h/atlas@1.0.0-rc.2':
+    resolution: {integrity: sha512-hfXKtj7E5pwyfhvjpHRTgNwt2/E7aSWd8sHzhDg+aKQoX5EGCT+upO4u9CsoJmkBzZFqheSW8fL7oCVzqYiZiA==}
+    engines: {node: '>=22', pnpm: '>=10'}
+
+  '@c4h/daedalus@1.0.0-rc.1':
+    resolution: {integrity: sha512-Niyu3HCT8Z3MawpGaAq6K8cQL7nFEpPAf0PS6ZEnROlyWngWRGQcgDKQOqQOaAP5U0KDNqZaVwtrFV0MdQb8Bg==}
+    engines: {node: '>=22', pnpm: '>=10'}
 
   '@csstools/color-helpers@6.1.2':
     resolution: {integrity: sha512-grhRy3OKmniaAEKXMjua5z/EODX0MSqBGjunw8+j/3HQjOnahs2AGhvEOIYVUWcU6ScApbhLhVrQTX8XqrMrow==}
@@ -889,6 +893,12 @@ snapshots:
   '@bramus/specificity@2.4.3':
     dependencies:
       css-tree: 3.2.1
+
+  '@c4h/atlas@1.0.0-rc.2':
+    dependencies:
+      proj-wasm: 0.1.0-alpha8
+
+  '@c4h/daedalus@1.0.0-rc.1': {}
 
   '@csstools/color-helpers@6.1.2': {}
 

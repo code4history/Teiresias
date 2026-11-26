@@ -52,10 +52,10 @@
     "prepublishOnly": "pnpm run test && pnpm run typecheck && pnpm run test:types && pnpm run test:types:atlas && pnpm run build && pnpm run verify:demo && pnpm run verify:demo-bundle"
   },
   "dependencies": {
-    "@c4h/daedalus": "^1.0.0"
+    "@c4h/daedalus": "^1.0.0-rc.1"
   },
   "devDependencies": {
-    "@c4h/atlas": "^1.0.0",
+    "@c4h/atlas": "^1.0.0-rc.1",
     "@types/node": "^26.6.5",
     "@vitest/coverage-v8": "^5.0.4",
     "jsdom": "^30.0.1",

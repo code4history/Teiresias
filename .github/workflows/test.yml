@@ -16,27 +16,10 @@ jobs:
       matrix:
         node-version: [22, 24]
     steps:
-      # Atlas and Daedalus are checked out next to this repository; ci/pnpm-workspace.ci.yaml
-      # resolves @c4h/atlas and @c4h/daedalus to them with link: overrides.
+      # Atlas and Daedalus come from npm (their release candidates); no sibling checkouts.
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: Teiresias
-          persist-credentials: false
-      # Sibling ref: same name, then base ref, then the latest train/* branch, then master.
-      - name: Select sibling refs
-        id: sibling
-        run: node Teiresias/scripts/select-sibling-ref.mjs code4history/Daedalus code4history/Atlas
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: code4history/Daedalus
-          ref: ${{ steps.sibling.outputs.daedalus }}
-          path: Daedalus
-          persist-credentials: false
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          repository: code4history/Atlas
-          ref: ${{ steps.sibling.outputs.atlas }}
-          path: Atlas
           persist-credentials: false
 
       - name: Install pnpm
@@ -48,20 +31,9 @@ jobs:
         with:
           node-version: ${{ matrix.node-version }}
           cache: pnpm
-          cache-dependency-path: |
-            Teiresias/pnpm-lock.yaml
-            Atlas/pnpm-lock.yaml
-            Daedalus/pnpm-lock.yaml
+          cache-dependency-path: Teiresias/pnpm-lock.yaml
 
-      # Each repository keeps its pnpm settings in ci/pnpm-workspace.ci.yaml (pnpm 11 reads
-      # them only from pnpm-workspace.yaml, which is not committed).
-      - name: Build Daedalus
-        working-directory: Daedalus
-        run: cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml && pnpm install --frozen-lockfile && pnpm run build
-      - name: Build Atlas
-        working-directory: Atlas
-        run: cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml && pnpm install --frozen-lockfile && pnpm run build
-
+      # pnpm 11 reads these settings only from pnpm-workspace.yaml, which is not committed.
       - name: Use CI pnpm settings
         working-directory: Teiresias
         run: cp ci/pnpm-workspace.ci.yaml pnpm-workspace.yaml
@@ -83,11 +55,11 @@ jobs:
       - name: Build package
         working-directory: Teiresias
         run: pnpm run build
-      # Packs Atlas, Daedalus and this package, installs the three tarballs into an empty
+      # Packs this package, installs it with Atlas and Daedalus from npm into an empty
       # directory and runs the estimate through the public imports only.
       - name: Consumer smoke test
         working-directory: Teiresias
-        run: pnpm run smoke:consumer
+        run: pnpm run smoke:consumer --deps-from-registry '^1.0.0-rc.1'
       - name: Verify demo Pages artifact
         working-directory: Teiresias
         run: pnpm run verify:demo
