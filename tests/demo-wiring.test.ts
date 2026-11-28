@@ -143,7 +143,7 @@ const EXPECTATION_BY_PRESET: Readonly<Record<string, string>> = Object.freeze({
   'y-direction':
     'どちらも VI 系とその同値の組（EPSG:2448・EPSG:6674・ESRI:112206）が上位。yScale の符号だけが分かれる（A は上向き、B は下向き）',
   normalization:
-    'A: 真値の組が上位で、識別力の札は「識別できている」。B: 真値が上位から落ち、識別力の札が「潰れている」になる（識別力は、同じ定義の候補をまとめて 1 つと数えたときの 1 位と 2 位の比）',
+    'A: 真値の組が上位で、識別力の札は「識別できている」。B: 識別力の札が「潰れている」になる（反射した GCP は当てはまりが崩れ、候補どうしが地上の距離で同じ当てはまりになる）（識別力は、同じ定義の候補をまとめて 1 つと数えたときの 1 位と 2 位の比）',
   'historical-grid': HISTORICAL_GRID_EXPECTATION_TEXT,
 });
 

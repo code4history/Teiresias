@@ -212,7 +212,7 @@ describe('デモのプリセットの A と B で出力が分かれる（実 eng
     expect(b.result.untransformableIds.filter((id) => id.startsWith('UTJCP:'))).toEqual([]);
   });
 
-  it('normalization: 正規化ありは真値の組が上位で識別できており、なしは真値が落ちて潰れる', async () => {
+  it('normalization: 正規化ありは真値の組が上位で識別できており、なしは識別力が潰れる', async () => {
     const a = await runPresetOption(optionOf('normalization', 'a'));
     const b = await runPresetOption(optionOf('normalization', 'b'));
     const klass = truthClassIds(optionOf('normalization', 'a'), a.candidates);
@@ -230,8 +230,10 @@ describe('デモのプリセットの A と B で出力が分かれる（実 eng
     expect(klass).not.toContain(a.result.discrimination.against);
     expect(a.result.discrimination.ratio as number).not.toBeNull();
 
-    // B: 真値が上位から落ち、識別力が潰れている
-    expect(klass).not.toContain(b.result.ranked[0]?.id);
+    // B: 識別力が潰れている。反射した GCP の当てはまりは崩れ、候補どうしが地上の距離で同じ当てはまりになる。
+    // 真値の組が先頭に残るかどうかは、崩れた当てはまりの残差の細部（相対 1.4e-6 の差。PROJ の感度は約 1e-10）で
+    // 決まり、真値を選べているわけではないので、順位は assert しない
+    // （score を地上の距離に直す前は、縮尺係数の差が順位を決めて、真値が先頭から落ちていた）
     expect(b.result.discrimination.collapsed).toBe(true);
     expect(b.result.discrimination.ratio as number).toBeLessThan(
       a.result.discrimination.ratio === Infinity ? Number.MAX_VALUE : (a.result.discrimination.ratio as number),

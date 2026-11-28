@@ -144,6 +144,60 @@ export function computeObservationScale(
 }
 
 /**
+ * GCP の地上の点（m）。`computeObservationScale` と同じ地上の近似で測る。
+ *
+ * - `lonlat_deg`: bbox 中心緯度の local ENU の一次近似（東西は cos φ 倍）。
+ * - `planar_xy`: 入力の座標そのもの（`ft` は m に直す）。
+ */
+function groundPointsOf(gcps: readonly GcpPair[], geoBasis: GeoBasis): Array<[number, number]> {
+  if (geoBasis.kind === 'lonlat_deg') {
+    let minY = Number.POSITIVE_INFINITY;
+    let maxY = Number.NEGATIVE_INFINITY;
+    for (const { geo } of gcps) {
+      if (geo[1] < minY) minY = geo[1];
+      if (geo[1] > maxY) maxY = geo[1];
+    }
+    const cosLat = Math.cos((((minY + maxY) / 2) * Math.PI) / 180);
+    return gcps.map(({ geo }) => [geo[0] * METRES_PER_DEGREE * cosLat, geo[1] * METRES_PER_DEGREE]);
+  }
+  const metresPerUnit = geoBasis.unit === 'ft' ? METRES_PER_FOOT : 1;
+  return gcps.map(({ geo }) => [geo[0] * metresPerUnit, geo[1] * metresPerUnit]);
+}
+
+/** 点群の重心からの二乗距離の平均の平方根（RMS 半径）。 */
+function rmsRadiusOf(points: ReadonlyArray<readonly [number, number]>): number {
+  const n = points.length;
+  if (n === 0) return Number.NaN;
+  let meanX = 0;
+  let meanY = 0;
+  for (const [x, y] of points) {
+    meanX += x;
+    meanY += y;
+  }
+  meanX /= n;
+  meanY /= n;
+  let sumSquares = 0;
+  for (const [x, y] of points) sumSquares += (x - meanX) ** 2 + (y - meanY) ** 2;
+  return Math.sqrt(sumSquares / n);
+}
+
+/**
+ * 候補の CRS の、GCP の領域での縮尺係数（CRS の m ÷ 地上の m）。
+ *
+ * 同じ GCP の群を地上と候補の CRS で並べたときの、重心からの RMS 半径の比である。
+ * 候補ごとに transformer へ点を足さずに（契約は入力と同順同数）、群の広がりの平均の縮尺を測る。
+ * 紙と地上が相似なら、CRS の座標も地上と相似（縮尺 k 倍）なので、比はちょうど k になる。
+ * 3857 は緯度 φ で 1/cos φ 前後・平面直角座標系と UTM は 1 前後。ただし地上は `L_geo` と同じ球の近似
+ * （1 度 = 111320 m）なので、`k` は楕円体との差（0.3% 以内。実測で盛岡 +0.16%）を含む、地上の近似に対する比である。
+ */
+function scaleFactorOf(
+  groundRadius: number,
+  projected: ReadonlyArray<readonly [number, number]>,
+): number {
+  return rmsRadiusOf(projected) / groundRadius;
+}
+
+/**
  * shear 前 basic RMS を Daedalus の返却から一意に取り出す。
  *
  * - `debug.sseSimilarity` が有限なら `sqrt(sseSimilarity / n)`。
@@ -580,6 +634,9 @@ export async function estimateCrs(
     ...holdout.map((pair) => pair.geo),
   ];
 
+  // 候補の残差を地上の m に直すための、GCP の地上の広がり（候補に依らない）
+  const groundRadius = isEmptyInput ? Number.NaN : rmsRadiusOf(groundPointsOf(gcps, sourceBasis));
+
   const untransformableIds: string[] = [];
   const untransformableIdSet = new Set<string>();
   const seenIds = new Set<string>();
@@ -687,9 +744,16 @@ export async function estimateCrs(
     }
     const { fit, basicRmsMeters } = chosen;
 
+    // 残差は候補の CRS の座標で測っている。縮尺係数が 1 から離れた CRS（3857 は 1/cos φ）で
+    // 分母の地上の距離と尺度がずれないよう、地上の m に直してから分母で割る。
+    // 縮尺係数が求まらない（候補の座標が 1 点に潰れた）ときは score を出さない
+    const scaleFactor = scaleFactorOf(groundRadius, gcpPoints);
     const score =
-      Number.isFinite(observationScale) && observationScale > 0
-        ? basicRmsMeters / observationScale
+      Number.isFinite(scaleFactor) &&
+      scaleFactor > 0 &&
+      Number.isFinite(observationScale) &&
+      observationScale > 0
+        ? basicRmsMeters / scaleFactor / observationScale
         : null;
 
     usable.push({

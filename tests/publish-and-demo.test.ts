@@ -234,7 +234,7 @@ describe('ワークフローの静的検査（CI の検証ではない）', () =
     }
     // Pages の action は 40 桁の SHA で固定し、系列をタグのコメントで残す
     expect(deploy).toMatch(/actions\/configure-pages@[0-9a-f]{40} # v5\b/);
-    expect(deploy).toMatch(/actions\/upload-pages-artifact@[0-9a-f]{40} # v3\b/);
+    expect(deploy).toMatch(/actions\/upload-pages-artifact@[0-9a-f]{40} # v4\.0\.0\b/);
     expect(deploy).toMatch(/actions\/deploy-pages@[0-9a-f]{40} # v4\b/);
     // 起動ブランチの取り違え検出
     expect(deploy).not.toContain('- main');
