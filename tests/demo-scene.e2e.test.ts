@@ -3,7 +3,7 @@
  *
  * 確かめること（(a)〜(e)）:
  * - (a) 反射なしで真値 `EPSG:6674` が `ranked[0]`
- * - (b) 反射なしの `rms[2位]/rms[1位]` が `1e6` を超える
+ * - (b) 反射なしの `score[相手]/score[1位]` が `1e6` を超える
  * - (c) 反射ありで同比が `1.01` 未満に落ちる（= 識別力が潰れる）
  * - (d) 既定カタログ + 反射ありで識別力が潰れる（反射なしでは真値の縮退クラスが先頭を占め、識別できている）
  *
@@ -103,7 +103,7 @@ describe('デモの現象を実 Atlas engine で固定する', () => {
     expect(result.untransformableIds).toEqual([]);
   });
 
-  it('(b) 反射なしの rms[2位]/rms[1位] が 1e6 を超える（識別できている）', async () => {
+  it('(b) 反射なしの score[相手]/score[1位] が 1e6 を超える（識別できている）', async () => {
     const result = await scene({ mode: 'zones', yFlip: false });
     const { ratio, collapsed } = result.discrimination;
     expect(ratio).not.toBeNull();
@@ -180,17 +180,30 @@ describe('デモの現象を実 Atlas engine で固定する', () => {
 describe('discriminationOf の境界（純関数側）', () => {
   it('候補が 1 件以下なら ratio / collapsed は null（判定不能を偽で表さない）', () => {
     expect(discriminationOf([])).toMatchObject({ ratio: null, collapsed: null });
-    expect(discriminationOf([{ rmsMeters: 1 }])).toMatchObject({ ratio: null, collapsed: null });
+    expect(discriminationOf([{ score: 1 }])).toMatchObject({ ratio: null, collapsed: null });
   });
 
-  it('1 位が厳密適合（0 m）なら ratio は Infinity である（0 除算を作らない）', () => {
-    const report = discriminationOf([{ rmsMeters: 0 }, { rmsMeters: 3 }]);
+  it('1 位の score が 0（厳密適合）なら ratio は Infinity である（0 除算を作らない）', () => {
+    const report = discriminationOf([{ score: 0 }, { score: 3 }]);
     expect(report.ratio).toBe(Infinity);
     expect(report.collapsed).toBe(false);
   });
 
   it('閾値のすぐ下は collapsed、すぐ上は not collapsed である（検査が実際に発火する）', () => {
-    expect(discriminationOf([{ rmsMeters: 1 }, { rmsMeters: COLLAPSE_THRESHOLD - 1e-6 }]).collapsed).toBe(true);
-    expect(discriminationOf([{ rmsMeters: 1 }, { rmsMeters: COLLAPSE_THRESHOLD + 1e-6 }]).collapsed).toBe(false);
+    expect(discriminationOf([{ score: 1 }, { score: COLLAPSE_THRESHOLD - 1e-6 }]).collapsed).toBe(true);
+    expect(discriminationOf([{ score: 1 }, { score: COLLAPSE_THRESHOLD + 1e-6 }]).collapsed).toBe(false);
+  });
+
+  it('score が null か有限でないときは ratio / collapsed は null（比を出さない）', () => {
+    for (const bad of [null, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(discriminationOf([{ score: 1 }, { score: bad }])).toMatchObject({ ratio: null, collapsed: null });
+      expect(discriminationOf([{ score: bad }, { score: 1 }])).toMatchObject({ ratio: null, collapsed: null });
+    }
+  });
+
+  it('比べた相手の score が 0 なら ratio は 0 で、潰れていると出る', () => {
+    const report = discriminationOf([{ score: 1 }, { score: 0 }]);
+    expect(report.ratio).toBe(0);
+    expect(report.collapsed).toBe(true);
   });
 });

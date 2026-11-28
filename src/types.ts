@@ -160,7 +160,8 @@ export interface EstimationFailure {
  * ∴ 縮尺係数の違う候補どうしでも、閾値とも比べられる。`rmsMeters` は `k` で割らない（候補の座標での残差）。
  * `ranked` の順は `score` に従う。
  *
- * 単位: `rmsMeters` は全候補で比べられるよう常に metre である。`unit` はその候補の座標の単位で、
+ * 単位: `rmsMeters` は単位を metre にそろえてあるが、投影の倍率の補正はしていないので、
+ * 候補の比較には `score` を使う。`unit` はその候補の座標の単位で、
  * `worldFile` もその単位の写像（pixel → 候補の座標）である。plain な点列を返した候補は
  * `{ name: 'metre', metresPerUnit: 1 }` になる。
  *
