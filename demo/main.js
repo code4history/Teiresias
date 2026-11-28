@@ -359,17 +359,23 @@ export function initDemo(config = {}) {
   function renderDiscrimination(scene) {
     clearChildren(el.discrimination);
     if (!el.discrimination || !scene) return;
-    const { ratio, collapsed } = scene.discrimination;
+    const { ratio, collapsed, against } = scene.discrimination;
 
     const badge = doc.createElement('span');
     badge.className = collapsed ? 'c4h-badge teiresias-badge-collapsed' : 'c4h-badge';
     badge.textContent =
-      collapsed === null ? '判定不能（候補が 1 件以下）' : collapsed ? '識別力が潰れている' : '識別できている';
+      collapsed === null
+        ? against === null || against === undefined
+          ? '判定不能（候補が 1 件以下）'
+          : '判定不能（score を比べられない）'
+        : collapsed
+          ? '識別力が潰れている'
+          : '識別できている';
     el.discrimination.appendChild(badge);
 
     const text = doc.createElement('span');
     text.className = 'teiresias-discrimination-text';
-    text.textContent = ` 識別力 rms[比べた相手]/rms[1位] = ${formatRatio(ratio)}`;
+    text.textContent = ` 識別力 score[比べた相手]/score[1位] = ${formatRatio(ratio)}`;
     el.discrimination.appendChild(text);
 
     // 比べた相手。同じ定義の候補（真値の縮退クラス）は 1 つと数えるので、2 位とは限らない。
@@ -385,7 +391,8 @@ export function initDemo(config = {}) {
    * 1 位と**比べた相手**（1 位と定義が違う最初の候補）の `rmsMeters` を並べて出す。
    *
    * 相手は識別力の札と同じ `discrimination.against` を使う（同じ定義を 2 か所で実装しない）。
-   * 残差は metre で比べられる（単位が違う候補でも同じ土俵）。差が小さいことは隠さず、数で出す。
+   * 残差は単位を metre にそろえてある（単位が違う候補でも同じ土俵）が、投影の倍率の補正は
+   * していない ∴ 候補の比較（識別力の比）は score で行う。差が小さいことは隠さず、数で出す。
    * 比べた相手が無い（`against` が null）ときは相手の側を「—」にする。
    */
   function topRmsLineOf(scene) {

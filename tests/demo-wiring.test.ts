@@ -143,7 +143,7 @@ const EXPECTATION_BY_PRESET: Readonly<Record<string, string>> = Object.freeze({
   'y-direction':
     'どちらも VI 系とその同値の組（EPSG:2448・EPSG:6674・ESRI:112206）が上位。yScale の符号だけが分かれる（A は上向き、B は下向き）',
   normalization:
-    'A: 真値の組が上位で、識別力の札は「識別できている」。B: 真値が上位から落ち、識別力の札が「潰れている」になる（識別力は、同じ定義の候補をまとめて 1 つと数えたときの 1 位と 2 位の比）',
+    'A: 真値の組が上位で、識別力の札は「識別できている」。B: 識別力の札が「潰れている」になる（反射した GCP は当てはまりが崩れ、候補どうしが地上の距離で同じ当てはまりになる）（識別力は、同じ定義の候補をまとめて 1 つと数えたときの 1 位と 2 位の比）',
   'historical-grid': HISTORICAL_GRID_EXPECTATION_TEXT,
 });
 
@@ -153,9 +153,9 @@ const UNFITTABLE_IDS = new Set([UNFITTABLE_ID]);
 /**
  * 京都の候補。真値だけが**等方スケール**（= 相似変換で厳密適合する）であり、他の行は
  * わずかに非等方である ∴
- *   - 反射なし … 真値 rms = 0 → 比は Infinity（識別できている）
+ *   - 反射なし … 真値 score = 0 → 比は Infinity（識別できている）
  *   - 反射あり … 全行が反射由来の巨大残差に支配され、差は `1e-3` 相対 → 比は 1.0x（潰れる）
- * これは実 engine で観測される現象（`1.000199…`）と**同じ構造**である。
+ * これは実 engine で観測される現象（score の比で `1.000000000057…`）と**同じ構造**である。
  *
  * 流れの 3 つの件数を 1 つずつ違えるため、`null` を返す行と当てはめに使えない行を混ぜる。
  */
@@ -878,7 +878,7 @@ describe('流れ・識別力・印・失敗の表示（stub の定義から期�
     expect(ratio).not.toBeNull();
     expect(Number.isFinite(ratio)).toBe(true);
     expect(ratio).toBeGreaterThan(0);
-    expect(discriminationText()).toContain(`識別力 rms[比べた相手]/rms[1位] = ${formatRatioForTest(ratio)}`);
+    expect(discriminationText()).toContain(`識別力 score[比べた相手]/score[1位] = ${formatRatioForTest(ratio)}`);
   });
 
   it('識別力の札に「比べた相手」として stub の正しい候補 ID が出る', async () => {

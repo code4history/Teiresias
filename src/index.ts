@@ -6,6 +6,19 @@
  * テストは `../src/estimate-crs.js` を直接 import して内部 helper を検証する。
  */
 export { estimateCrs } from './estimate-crs.js';
+export {
+  CRS_SWITCH_MAX_RATIO,
+  TRANSFORM_SETUP_THRESHOLDS,
+  recommendTransformSetup,
+  recommendTransformSetupFromScore,
+  shouldRecommendCrsSwitch,
+} from './recommend.js';
+export type {
+  RecommendOptions,
+  RecommendationReason,
+  TransformRecommendation,
+  TransformSetup,
+} from './recommend.js';
 
 export type {
   CandidateCrs,

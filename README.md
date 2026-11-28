@@ -24,8 +24,9 @@ pnpm add @c4h/teiresias @c4h/atlas
 
 ## Public API
 
-The `exports` of `package.json` only exposes the public root `"."`. Only `estimateCrs` and the public
-types are exposed; the internal helpers (ranking / status derivation) are not.
+The `exports` of `package.json` only exposes the public root `"."`. Only `estimateCrs`, the transform-setup
+recommendation (see "Recommending the transform setup") and the public types are exposed; the internal
+helpers (ranking / status derivation) are not.
 
 ```ts
 import { estimateCrs } from '@c4h/teiresias';
@@ -123,8 +124,9 @@ that unit.
 Teiresias multiplies the returned points by `metresPerUnit` and fits in metres: the holdout points are
 converted with the same factor, and the `[E, N]` handed to Daedalus is always metric. Therefore:
 
-- `rmsMeters` (on `ranked` and on `selected`) stays in metres, so every candidate of one call is
-  comparable on the same scale.
+- `rmsMeters` (on `ranked` and on `selected`) stays in metres as a unit (the residual in the coordinates of
+  that candidate, not divided by the scale factor `k`). Compare candidates by the `score`, which is
+  measured as a distance on the ground.
 - `selected.unit` and `ranked[].unit` carry the unit of that candidate's coordinates. They are
   `{ name: 'metre', metresPerUnit: 1 }` for a transformer that returns a plain point list.
 - `selected.worldFile` is the pixel → **that unit** mapping: all six values are divided by
@@ -181,12 +183,34 @@ and the demo (`demo/atlas-engine.js`) are wired this way.
 
 ## Ranking and score
 
-- The order is decided by the **basic (similarity) RMS before shear**. Since Daedalus may finally adopt
-  affine, using the final RMS for the order would make "affine rescues a wrong candidate and inverts the
-  order" happen.
-- `score = basicRmsMeters / L_geo`. `L_geo` is the observation-area scale (m) common to all the input
-  GCPs, so within the same estimation call the score is equivalent to ascending basic RMS. The score is
-  a relative error with respect to the observation area; it is not a probability or a confidence.
+- The order is decided by the **basic (similarity) RMS before shear**, measured as a distance on the
+  ground (see the next item). Since Daedalus may finally adopt affine, using the final RMS for the order
+  would make "affine rescues a wrong candidate and inverts the order" happen.
+- `score = (basicRmsMeters / k) / L_geo`. **The numerator and the denominator are both distances on the
+  ground (m).**
+  - `L_geo` is the observation-area scale (m) common to all the input GCPs (the diagonal of their
+    bounding box on the ground).
+  - `basicRmsMeters` is the residual in the coordinates of the candidate CRS, so it is stretched by the
+    scale factor of that CRS: about `1 / cos φ` for EPSG:3857 (1.2 to 1.4 in Japan), about 1 for the
+    Japan Plane Rectangular CS and UTM. `k` is that factor in the area of the GCPs: the ratio of the RMS
+    distance of the GCPs from their centroid in the candidate CRS to the same distance on the ground.
+    The ground here is the same approximation as `L_geo` (a sphere, 1 degree = 111320 m), so `k` contains
+    the difference from the ellipsoid (measured on the 45 GCPs of the Morioka castle map: +0.16 %, where `k`
+    is about 0.9984 for the Plane Rectangular CS X). Dividing by `k` brings the residual back to a distance on that ground. This needs no extra call
+    of the transformer, and it works for a candidate in feet (the points are already converted to metres)
+    and for an input of `planar_xy` (the input coordinates are the ground).
+  - So the score can be compared **between candidates and with a threshold**, whatever their scale factor.
+    Even when the map and the ground are exactly similar, the correction by `k` removes a uniform difference
+    of scale, but the curvature of the projection and a scale difference between directions remain. What we
+    measured (which maps, how many points): on synthetic similar maps (25 points each) "EPSG:3857 / the
+    ground mapping" is 0.996 (latitude 35.7°) and 0.994 (43.06°, mock projections), and "EPSG:3857 / the
+    plane rectangular CS IX" is 1.000 (a sheet drawn in the coordinates of IX, real engine); on 3 real maps
+    that are not similar (the Morioka castle map with 45 GCPs, Nara 1894 with 58, the Tatebayashi castle
+    picture with 58) "plane rectangular CS / 3857" is 0.998 to 1.014. The score is a relative error with
+    respect to the observation area; it is not a probability or a confidence.
+  - `rmsMeters` is not divided by `k` (see "The difference in the meaning of `rmsMeters`"). The order of
+    `ranked` follows the score, so it can differ from the order of `rmsMeters` when the candidates have
+    different scale factors.
 - The order given in `datumFamilyPrior` only takes effect on ties (within machine precision). The prior
   never inverts a clear difference in fit. Finally the ordering closes deterministically by the code-unit
   order of the identity.
@@ -213,12 +237,45 @@ of `selected.worldFile` (`xScale * yScale - xSkew * ySkew < 0`).
 
 | value | meaning |
 |---|---|
-| `ranked[].rmsMeters` / `selected.rmsMeters` | **the pre-shear basic RMS used for the ranking**, in metres |
+| `ranked[].rmsMeters` / `selected.rmsMeters` | **the pre-shear basic RMS of the ranking**, in metres of the candidate's own coordinates (not divided by the scale factor `k` of the CRS; the `score` is) |
 | `selected.worldFile` / `selected.qualityGate` | **the final return of Daedalus for the same candidate** (which may include an adopted affine) |
 | `selected.unit` / `ranked[].unit` | **the linear unit of that candidate's coordinates**; `selected.worldFile` is in it, `rmsMeters` is not |
 
 Therefore, when `selected.worldFile` is affine, `selected.rmsMeters` is not the residual of that
 worldFile. There is no API that exposes the final RMS under a different name.
+
+## Recommending the transform setup
+
+From the `score` of the adopted CRS, `recommendTransformSetup(result, options?)` recommends how the map
+should be transformed. It returns `TransformRecommendation` = `{ setups, reason, score }`, where each
+`TransformSetup` is one of:
+
+| `TransformSetup` | meaning |
+|---|---|
+| `worldFileOnly` | CRS + world file only (no triangulation) |
+| `tinGlobal` | CRS + world file + triangulation; outside the triangulation's quadrilateral the world file (the global model) is used |
+| `tinFan` | CRS + world file + triangulation; outside the quadrilateral the fan from the centroid is used |
+
+- The thresholds are `TRANSFORM_SETUP_THRESHOLDS` (`score` below 0.005 → `worldFileOnly`, 0.035 and above →
+  `tinFan`, otherwise `tinGlobal`). Near a border (0.003–0.008 and 0.03–0.04) two setups are returned and the
+  `reason` (`RecommendationReason`) is `'borderline'`; the closer one comes first. They are provisional
+  values set from seven real maps and will be revised as more maps are measured. Each band includes its
+  lower end and excludes its upper end (`[0.003, 0.008)` and `[0.03, 0.04)`; exactly 0.008 or 0.04 gives a
+  single setup).
+- `RecommendationReason` is one of `'clear'` (one setup), `'borderline'` (two setups), `'birdeye'` and
+  `'unavailable'`. An invalid score takes precedence over `'birdeye'`, and `'birdeye'` over `'borderline'`.
+- With `RecommendOptions.vertexMode: 'birdeye'` only `tinFan` is recommended (the global model of a
+  bird's-eye view is a projective transform, not a world file).
+- Nothing is recommended (`reason: 'unavailable'`, `setups: []`, `score: null`) when `status` is not
+  `ok`/`ok_with_warnings`, when there is no `selected` or no `score`, when `qualityGate` is `preview`, or
+  when the score is not finite or negative.
+- `recommendTransformSetupFromScore(score, options?)` does the same from a bare score.
+- `shouldRecommendCrsSwitch(bestScore, baseScore)` tells whether switching from the base CRS (EPSG:3857)
+  to the best candidate is worth recommending: only when the best score is at most
+  `CRS_SWITCH_MAX_RATIO` (0.95) times the base score. It returns `false` when either is `null` or not
+  finite, when the best score is negative, or when the base score is 0 or less. At city scale the candidates differ by less than
+  0.5 %, and switching would only add a projection definition to the viewer.
+- The recommendation is advice; which setup to adopt is the decision of the Editor's user.
 
 ## Status and diagnostics
 
