@@ -3,9 +3,9 @@
  *
  * 確かめること（(a)〜(e)）:
  * - (a) 反射なしで真値 `EPSG:6674` が `ranked[0]`
- * - (b) 反射なしの `rms[2位]/rms[1位]` が `1e6` を超える
+ * - (b) 反射なしの `score[相手]/score[1位]` が `1e6` を超える
  * - (c) 反射ありで同比が `1.01` 未満に落ちる（= 識別力が潰れる）
- * - (d) 既定カタログ + 反射ありで真値が先頭 3 件から外れる（真値の縮退クラスが先頭を占めない）
+ * - (d) 既定カタログ + 反射ありで識別力が潰れる（反射なしでは真値の縮退クラスが先頭を占め、識別できている）
  *
  * (c)(d) はデモの「反射を吸収する」を外した側（`chirality: 'direct-only'`）の固定である。
  * 正規化あり（既定）の側は (c')(d') が固定する — 反射の有無によらず真値の縮退クラスが上位を
@@ -103,7 +103,7 @@ describe('デモの現象を実 Atlas engine で固定する', () => {
     expect(result.untransformableIds).toEqual([]);
   });
 
-  it('(b) 反射なしの rms[2位]/rms[1位] が 1e6 を超える（識別できている）', async () => {
+  it('(b) 反射なしの score[相手]/score[1位] が 1e6 を超える（識別できている）', async () => {
     const result = await scene({ mode: 'zones', yFlip: false });
     const { ratio, collapsed } = result.discrimination;
     expect(ratio).not.toBeNull();
@@ -119,20 +119,22 @@ describe('デモの現象を実 Atlas engine で固定する', () => {
     expect(collapsed).toBe(true);
   });
 
-  it('(d) 正規化なし（direct-only）: 既定カタログ + 反射ありでは真値が先頭 3 件から外れる', async () => {
+  it('(d) 正規化なし（direct-only）: 既定カタログ + 反射ありでは識別力が潰れ、反射なしでは識別できている', async () => {
     const reflected = await scene({ mode: 'catalog', yFlip: true, chirality: 'direct-only' });
     const forward = await scene({ mode: 'catalog', yFlip: false, chirality: 'direct-only' });
     const klass = await truthClassIds('catalog');
     expect(klass).toContain(TRUE_ID);
 
-    // 縮退クラスの先頭は identity 順で決まるため、ranked[0] が真値でないことは何も区別しない。
-    // 区別するのは「真値が先頭 k 件に入るか」である。
     expect(reflected.ranked.length).toBeGreaterThan(klass.length);
-    expect(reflected.ranked.slice(0, klass.length).some((entry) => entry.isTruth)).toBe(false);
-    expect(headIds(reflected.ranked, klass.length)).not.toEqual(klass);
     expect(reflected.ranked.some((entry) => entry.isTruth)).toBe(true);
-    // 反射なしでは真値の縮退クラスが先頭 k 件を占める（対照）
+    // 反射ありは当てはまりが崩れ、地上の距離で測ると候補によらず同じ当てはまりになる ∴ 識別力が潰れる。
+    // それでも先頭が真値の縮退クラスになるのは、他の候補より score が 1.4e-6 相対だけ小さい本物の差による
+    // （PROJ の感度は約 1e-10 ∴ 余裕は約 4 桁）。崩れた当てはまりの残差の細部で、真値を選べているわけではない
+    // （score を地上の距離に直す前は、縮尺係数の差が順位を決めて、真値が先頭 k 件から落ちていた）
+    expect(reflected.discrimination.collapsed).toBe(true);
+    // 反射なしでは真値の縮退クラスが先頭 k 件を占め、識別できている（対照）
     expect(headIds(forward.ranked, klass.length)).toEqual(klass);
+    expect(forward.discrimination.collapsed).toBe(false);
   });
 
   it("(c') 正規化あり（既定）: 反射ありでも真値が ranked[0] で識別できていて、yScale が負", async () => {
@@ -178,17 +180,30 @@ describe('デモの現象を実 Atlas engine で固定する', () => {
 describe('discriminationOf の境界（純関数側）', () => {
   it('候補が 1 件以下なら ratio / collapsed は null（判定不能を偽で表さない）', () => {
     expect(discriminationOf([])).toMatchObject({ ratio: null, collapsed: null });
-    expect(discriminationOf([{ rmsMeters: 1 }])).toMatchObject({ ratio: null, collapsed: null });
+    expect(discriminationOf([{ score: 1 }])).toMatchObject({ ratio: null, collapsed: null });
   });
 
-  it('1 位が厳密適合（0 m）なら ratio は Infinity である（0 除算を作らない）', () => {
-    const report = discriminationOf([{ rmsMeters: 0 }, { rmsMeters: 3 }]);
+  it('1 位の score が 0（厳密適合）なら ratio は Infinity である（0 除算を作らない）', () => {
+    const report = discriminationOf([{ score: 0 }, { score: 3 }]);
     expect(report.ratio).toBe(Infinity);
     expect(report.collapsed).toBe(false);
   });
 
   it('閾値のすぐ下は collapsed、すぐ上は not collapsed である（検査が実際に発火する）', () => {
-    expect(discriminationOf([{ rmsMeters: 1 }, { rmsMeters: COLLAPSE_THRESHOLD - 1e-6 }]).collapsed).toBe(true);
-    expect(discriminationOf([{ rmsMeters: 1 }, { rmsMeters: COLLAPSE_THRESHOLD + 1e-6 }]).collapsed).toBe(false);
+    expect(discriminationOf([{ score: 1 }, { score: COLLAPSE_THRESHOLD - 1e-6 }]).collapsed).toBe(true);
+    expect(discriminationOf([{ score: 1 }, { score: COLLAPSE_THRESHOLD + 1e-6 }]).collapsed).toBe(false);
+  });
+
+  it('score が null か有限でないときは ratio / collapsed は null（比を出さない）', () => {
+    for (const bad of [null, Number.NaN, Number.POSITIVE_INFINITY, Number.NEGATIVE_INFINITY]) {
+      expect(discriminationOf([{ score: 1 }, { score: bad }])).toMatchObject({ ratio: null, collapsed: null });
+      expect(discriminationOf([{ score: bad }, { score: 1 }])).toMatchObject({ ratio: null, collapsed: null });
+    }
+  });
+
+  it('比べた相手の score が 0 なら ratio は 0 で、潰れていると出る', () => {
+    const report = discriminationOf([{ score: 1 }, { score: 0 }]);
+    expect(report.ratio).toBe(0);
+    expect(report.collapsed).toBe(true);
   });
 });

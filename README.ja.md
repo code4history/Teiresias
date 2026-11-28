@@ -116,7 +116,7 @@ transformer はそのような候補を 2 つの形で返せる。
 Teiresias は返った点列を `metresPerUnit` 倍して metre で当てはめる。holdout の点も同じ倍率で換算し、
 Daedalus へ渡す `[E, N]` は常に metre である。∴
 
-- `ranked` と `selected` の `rmsMeters` は metre のまま（同じ呼び出しの全候補を同じ尺度で比べられる）。
+- `ranked` と `selected` の `rmsMeters` は、単位としては metre のまま（その候補の座標での残差。縮尺係数 `k` では割らない）。候補どうしの比較は、地上の距離に直した `score` で行う。
 - `selected.unit` と `ranked[].unit` はその候補の座標の単位を持つ。plain な点列を返す transformer では
   `{ name: 'metre', metresPerUnit: 1 }` になる。
 - `selected.worldFile` は pixel → **その単位**の写像である。6 値とも `metresPerUnit` で割る
@@ -168,11 +168,30 @@ Teiresias は throw／reject を候補ごとに受け止め、その候補を ad
 
 ## ranking と score
 
-- 順位は **shear 前の basic（similarity）RMS** で決める。Daedalus が最終的に affine を採用し得るため、
-  final RMS を順位に使うと「affine が誤候補を救済して順位を逆転する」ことが起きる。
-- `score = basicRmsMeters / L_geo`。`L_geo` は入力 GCP 全体に共通する観測域スケール（m）であり、
-  同じ推定呼出し内では basic RMS 昇順と同値である。score は観測域に対する相対誤差であり、
-  確率・信頼度ではない。
+- 順位は **shear 前の basic（similarity）RMS を、地上の距離で測ったもの**（次の項）で決める。Daedalus が
+  最終的に affine を採用し得るため、final RMS を順位に使うと「affine が誤候補を救済して順位を逆転する」
+  ことが起きる。
+- `score = (basicRmsMeters / k) / L_geo`。**分子も分母も地上の距離（m）である。**
+  - `L_geo` は入力 GCP 全体に共通する観測域スケール（m。GCP の bbox の、地上での対角）。
+  - `basicRmsMeters` は候補の CRS の座標での残差なので、その CRS の縮尺係数だけ伸び縮みしている。
+    EPSG:3857 は `1 / cos φ` 倍（日本では 1.2〜1.4）、平面直角座標系と UTM は 1 前後。
+    `k` は GCP のある領域でのその係数で、「候補の CRS での GCP の重心からの RMS 距離」と「同じ GCP の
+    地上での RMS 距離」の比である。ここでの地上は `L_geo` と同じ近似（球。1 度 = 111320 m）なので、`k` には
+    楕円体との差が入る（確かめた範囲の実測: 盛岡城図の GCP 45 点で +0.16%、平面直角座標系 X 系の `k` は
+    約 0.9984）。`k` で割ると、
+    残差がその地上の距離に戻る。transformer を余計に呼ばずに
+    求まり、ft の候補（点は m に直してある）や、入力が `planar_xy` の場合（入力の座標が地上）でも
+    そのまま使える。
+  - ∴ score は、縮尺係数の違う候補どうしでも、閾値とも**比べられる**。地図と地上がちょうど相似でも、
+    一様な倍率の差は `k` の補正で消えるが、投影の曲がりや方向による縮尺の差は残る。score の比を確かめた
+    範囲の実測（どの地図・何点か）は次のとおりである。合成の相似地図（各 25 点）では
+    「EPSG:3857 ÷ 地上の写像」が 0.996（緯度 35.7°）・0.994（同 43.06°。投影の式だけの mock）、
+    実 engine で平面直角座標系 IX 系の座標に描いた紙（25 点）の「EPSG:3857 ÷ IX 系」が 1.000。
+    実地図 3 枚（相似でない。盛岡城図 45 点・奈良 1894 58 点・館林城絵図 58 点）の
+    「平面直角座標系 ÷ 3857」は 0.998〜1.014 だった。score は観測域に対する相対誤差であり、
+    確率・信頼度ではない。
+  - `rmsMeters` は `k` で割らない（「`rmsMeters` の意味の違い」を参照）。`ranked` の順は score に従うので、
+    候補の縮尺係数が違うと、`rmsMeters` の順と食い違うことがある。
 - 同着（機械精度内）のときだけ `datumFamilyPrior` の指定順が働く。prior は明確な fit 差を逆転しない。
   最後は identity の code-unit 順で決定的に閉じる。
 
@@ -195,7 +214,7 @@ transformer の呼び出しは候補ごとに 1 回のまま変わらない。�
 
 | 値 | 意味 |
 |---|---|
-| `ranked[].rmsMeters` / `selected.rmsMeters` | **ranking に用いた shear 前 basic RMS**（metre） |
+| `ranked[].rmsMeters` / `selected.rmsMeters` | **ranking の shear 前 basic RMS**（その候補の座標での metre。CRS の縮尺係数 `k` では割らない。`k` で割るのは `score`） |
 | `selected.worldFile` / `selected.qualityGate` | **同じ候補に対する Daedalus の最終返却**（affine 採用を含み得る） |
 | `selected.unit` / `ranked[].unit` | **その候補の座標の単位**。`selected.worldFile` はこの単位で、`rmsMeters` はそうではない |
 

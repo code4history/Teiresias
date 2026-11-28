@@ -1,6 +1,8 @@
 /**
  * 識別力の比（`demo/estimate-scene.js` の `discriminationOf`）の単体テスト。
  *
+ * 比は **score** で取る（順位も score に従う）。`rmsMeters` は画面の rms の行に出す値であり、
+ * この試験では score と同じ数を入れている（比には効かない）。
  * 比べる相手は「1 位と**定義が違う**最初の候補」である。同じ定義の候補（真値の縮退クラス）が
  * 1 位から続いても、比が 1 に近づいて「潰れている」と誤って出ない。定義が分かるのは
  * `proj4ById`（`${authority}:${code}` → `proj4`）に両方の候補が在り、文字列として等しいときだけ
@@ -11,10 +13,10 @@ import { describe, expect, it } from 'vitest';
 
 import { COLLAPSE_THRESHOLD, discriminationOf } from '../demo/estimate-scene.js';
 
-type Ranked = { id: string; rmsMeters: number };
+type Ranked = { id: string; score: number; rmsMeters: number };
 
 function rankedOf(rows: ReadonlyArray<readonly [string, number]>): Ranked[] {
-  return rows.map(([id, rmsMeters]) => ({ id, rmsMeters }));
+  return rows.map(([id, score]) => ({ id, score, rmsMeters: score }));
 }
 
 describe('discriminationOf: 比べる相手（定義の違う最初の候補）', () => {
