@@ -30,8 +30,8 @@ export const TRUE_ID = DEFAULT_SCENE.truthId;
 /**
  * 「識別力が潰れている」の表示閾値。
  *
- * **物理的な意味を持つ定数ではなく、表示のための閾値である。** 反射ありの実測比が
- * `1.000199…`、反射なしが `4.89e+10` である ∴ 両者を分ける任意の値でよい。
+ * **物理的な意味を持つ定数ではなく、表示のための閾値である。** 反射ありの実測比（score の比）が
+ * `1.000000000057…`、反射なしが `4.89e+10` である ∴ 両者を分ける任意の値でよい。
  */
 export const COLLAPSE_THRESHOLD = 1.01;
 
@@ -87,16 +87,19 @@ function definitionOf(entry, proj4ById) {
 }
 
 /**
- * 識別力（1 位と、1 位と**定義が違う**最初の候補との RMS 比）。
+ * 識別力（1 位と、1 位と**定義が違う**最初の候補との score の比）。
  *
  * - 比べる相手は、`proj4ById` を渡したときは「1 位と `proj4` が等しくない最初の行」、
  *   渡さないときは 2 位である。真値が縮退している（同じ定義の候補が並ぶ）とき、2 位との比は
  *   1 に近づき「潰れている」と誤って出る ∴ 定義の違う最初の行と比べる。
- * - `ratio = 比べた相手の rmsMeters / ranked[0].rmsMeters`
- * - `ranked[0].rmsMeters === 0` なら `ratio = Infinity`（厳密適合。0 除算を作らない）
+ * - `ratio = 比べた相手の score / ranked[0].score`。順位を決めるのも score であり、
+ *   `rmsMeters` は投影の倍率を補正していないので比べ方に使わない。
+ * - `ranked[0].score === 0` なら `ratio = Infinity`（厳密適合。0 除算を作らない）
+ * - score が `null` か有限でないときは `ratio = null` / `collapsed = null`（比を出さない）
  * - 比べる相手が無い（`ranked.length < 2`・全件が同じ定義）なら
  *   `ratio = null` / `collapsed = null` / `against = null`（判定不能を偽で表さない）
  * - `against` は比べた相手の ID（画面に「比べた相手」として出す）
+ * - `top1Rms` / `top2Rms` は 1 位と比べた相手の `rmsMeters`（画面の rms の行に出す）
  */
 export function discriminationOf(ranked, proj4ById) {
   if (!Array.isArray(ranked) || ranked.length < 2) {
@@ -132,14 +135,26 @@ export function discriminationOf(ranked, proj4ById) {
   }
 
   const top2Rms = compared.rmsMeters;
-  const ratio = top1Rms === 0 ? Infinity : top2Rms / top1Rms;
+  const ratio = scoreRatioOf(ranked[0].score, compared.score);
   return {
     ratio,
     top1Rms,
     top2Rms,
-    collapsed: ratio < COLLAPSE_THRESHOLD,
+    collapsed: ratio === null ? null : ratio < COLLAPSE_THRESHOLD,
     against: identityOf(compared) ?? null,
   };
+}
+
+/**
+ * score の比（`比べた相手 / 1 位`）。比べられなければ `null`。
+ *
+ * - 1 位の score が 0 なら `Infinity`（厳密適合。0 除算を作らない）
+ * - どちらかの score が `null` か有限でない（`NaN`・`Infinity`）なら `null`
+ */
+function scoreRatioOf(top1Score, comparedScore) {
+  if (top1Score === null || !Number.isFinite(top1Score)) return null;
+  if (comparedScore === null || !Number.isFinite(comparedScore)) return null;
+  return top1Score === 0 ? Infinity : comparedScore / top1Score;
 }
 
 /**

@@ -188,7 +188,7 @@ function rmsRadiusOf(points: ReadonlyArray<readonly [number, number]>): number {
  * 候補ごとに transformer へ点を足さずに（契約は入力と同順同数）、群の広がりの平均の縮尺を測る。
  * 紙と地上が相似なら、CRS の座標も地上と相似（縮尺 k 倍）なので、比はちょうど k になる。
  * 3857 は緯度 φ で 1/cos φ 前後・平面直角座標系と UTM は 1 前後。ただし地上は `L_geo` と同じ球の近似
- * （1 度 = 111320 m）なので、`k` は楕円体との差（0.3% 以内。実測で盛岡 +0.16%）を含む、地上の近似に対する比である。
+ * （1 度 = 111320 m）なので、`k` は楕円体との差（確かめた範囲の実測で、盛岡城図の GCP 45 点で +0.16%）を含む、地上の近似に対する比である。
  */
 function scaleFactorOf(
   groundRadius: number,

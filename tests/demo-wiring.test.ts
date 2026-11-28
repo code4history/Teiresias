@@ -153,9 +153,9 @@ const UNFITTABLE_IDS = new Set([UNFITTABLE_ID]);
 /**
  * 京都の候補。真値だけが**等方スケール**（= 相似変換で厳密適合する）であり、他の行は
  * わずかに非等方である ∴
- *   - 反射なし … 真値 rms = 0 → 比は Infinity（識別できている）
+ *   - 反射なし … 真値 score = 0 → 比は Infinity（識別できている）
  *   - 反射あり … 全行が反射由来の巨大残差に支配され、差は `1e-3` 相対 → 比は 1.0x（潰れる）
- * これは実 engine で観測される現象（`1.000199…`）と**同じ構造**である。
+ * これは実 engine で観測される現象（score の比で `1.000000000057…`）と**同じ構造**である。
  *
  * 流れの 3 つの件数を 1 つずつ違えるため、`null` を返す行と当てはめに使えない行を混ぜる。
  */
@@ -878,7 +878,7 @@ describe('流れ・識別力・印・失敗の表示（stub の定義から期�
     expect(ratio).not.toBeNull();
     expect(Number.isFinite(ratio)).toBe(true);
     expect(ratio).toBeGreaterThan(0);
-    expect(discriminationText()).toContain(`識別力 rms[比べた相手]/rms[1位] = ${formatRatioForTest(ratio)}`);
+    expect(discriminationText()).toContain(`識別力 score[比べた相手]/score[1位] = ${formatRatioForTest(ratio)}`);
   });
 
   it('識別力の札に「比べた相手」として stub の正しい候補 ID が出る', async () => {

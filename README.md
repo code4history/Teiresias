@@ -195,14 +195,19 @@ and the demo (`demo/atlas-engine.js`) are wired this way.
     Japan Plane Rectangular CS and UTM. `k` is that factor in the area of the GCPs: the ratio of the RMS
     distance of the GCPs from their centroid in the candidate CRS to the same distance on the ground.
     The ground here is the same approximation as `L_geo` (a sphere, 1 degree = 111320 m), so `k` contains
-    the difference from the ellipsoid (within 0.3 %; +0.16 % at Morioka, where `k` is about 0.9984 for the
-    Plane Rectangular CS). Dividing by `k` brings the residual back to a distance on that ground. This needs no extra call
+    the difference from the ellipsoid (measured on the 45 GCPs of the Morioka castle map: +0.16 %, where `k`
+    is about 0.9984 for the Plane Rectangular CS X). Dividing by `k` brings the residual back to a distance on that ground. This needs no extra call
     of the transformer, and it works for a candidate in feet (the points are already converted to metres)
     and for an input of `planar_xy` (the input coordinates are the ground).
-  - So the score can be compared **between candidates and with a threshold**, whatever their scale factor:
-    when the map and the ground are exactly similar, the scores of EPSG:3857 and of a plane rectangular CS
-    are nearly equal (within about 0.3 %). The score is a relative error with respect to the observation area; it is not a
-    probability or a confidence.
+  - So the score can be compared **between candidates and with a threshold**, whatever their scale factor.
+    Even when the map and the ground are exactly similar, the correction by `k` removes a uniform difference
+    of scale, but the curvature of the projection and a scale difference between directions remain. What we
+    measured (which maps, how many points): on synthetic similar maps (25 points each) "EPSG:3857 / the
+    ground mapping" is 0.996 (latitude 35.7°) and 0.994 (43.06°, mock projections), and "EPSG:3857 / the
+    plane rectangular CS IX" is 1.000 (a sheet drawn in the coordinates of IX, real engine); on 3 real maps
+    that are not similar (the Morioka castle map with 45 GCPs, Nara 1894 with 58, the Tatebayashi castle
+    picture with 58) "plane rectangular CS / 3857" is 0.998 to 1.014. The score is a relative error with
+    respect to the observation area; it is not a probability or a confidence.
   - `rmsMeters` is not divided by `k` (see "The difference in the meaning of `rmsMeters`"). The order of
     `ranked` follows the score, so it can differ from the order of `rmsMeters` when the candidates have
     different scale factors.
